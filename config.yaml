@@ -31,8 +31,8 @@ use_unit_training: true
 training_unit_step: 3
 bootstrap_min_saturation: 8.0
 bootstrap_min_texture: 20.0
-taskA_yellow_threshold_k: 3.0
-taskA_yellow_min_ratio: 0.10
+taskA_yellow_threshold_k: 2.0
+taskA_yellow_min_ratio: 0.13
 dinov2_model: vit_small_patch14_dinov2
 input_size: 224
 device: auto
@@ -42,6 +42,7 @@ fps_output: 15
 tasks:
   taskA:
     video_path: dataset/taskA/taskA_data_video.mp4
+    train_duration: 280
     fixed_roi:
     - 556
     - 352
@@ -53,8 +54,14 @@ tasks:
     abnormal_times: []
     abnormal_start_s: 374
     rotate: 0
+    dynamic_localization: true
+    taskA_dynamic_crop_size: 354
+    presence_from_input: true
+    motion_threshold: 8.0
+    min_stable_frames: 5
   taskB:
     video_path: dataset/taskB/taskB_data_video.mp4
+    train_duration: 180
     rois:
     - - 73
       - 708

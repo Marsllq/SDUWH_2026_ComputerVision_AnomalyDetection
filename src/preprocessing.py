@@ -238,6 +238,7 @@ def extract_training_unit_patches(
     max_unit_frames: int = 180,
     bootstrap_min_saturation: float = 8.0,
     bootstrap_min_texture: float = 20.0,
+    presence_from_input: bool = False,
     unit_trim_ratio: float = 0.2,
     sample_step: int = 5,
     min_training_patches: int = 16,
@@ -257,6 +258,7 @@ def extract_training_unit_patches(
         max_unit_frames=max_unit_frames,
         bootstrap_min_saturation=bootstrap_min_saturation,
         bootstrap_min_texture=bootstrap_min_texture,
+        presence_from_input=presence_from_input,
     )
 
     patches: List[np.ndarray] = []
@@ -296,6 +298,101 @@ def extract_training_unit_patches(
         )
 
     print(f"  Unit training patches extracted: {len(patches)}")
+    return patches
+
+
+def extract_localized_training_unit_patches(
+    video_path: str,
+    roi_cfg: ROIConfig,
+    task_name: str,
+    cfg: dict,
+    skip_s: float = 60.0,
+    train_s: float = 120.0,
+    step: int = 3,
+    rotate: int = 0,
+    blur_threshold: float = 15.0,
+    motion_threshold: float = 6.0,
+    min_foreground_ratio: float = 0.015,
+    foreground_threshold: int = 22,
+    min_stable_frames: int = 3,
+    end_gap_frames: int = 3,
+    max_unit_frames: int = 180,
+    bootstrap_min_saturation: float = 8.0,
+    bootstrap_min_texture: float = 20.0,
+    presence_from_input: bool = False,
+    unit_trim_ratio: float = 0.2,
+    sample_step: int = 5,
+    min_training_patches: int = 16,
+) -> List[np.ndarray]:
+    """Extract training patches after task-specific localization."""
+    from src.locator import crop_dynamic_rois
+    from src.tracker import UnitTracker
+
+    coarse_rois = _normalize_rois(roi_cfg)
+    tracker = UnitTracker(
+        coarse_rois,
+        motion_threshold=motion_threshold,
+        blur_threshold=blur_threshold,
+        min_foreground_ratio=min_foreground_ratio,
+        foreground_threshold=foreground_threshold,
+        min_stable_frames=min_stable_frames,
+        end_gap_frames=end_gap_frames,
+        max_unit_frames=max_unit_frames,
+        bootstrap_min_saturation=bootstrap_min_saturation,
+        bootstrap_min_texture=bootstrap_min_texture,
+        presence_from_input=presence_from_input,
+    )
+
+    patches: List[np.ndarray] = []
+    fps = max(1.0, get_video_info(video_path)["fps"])
+    end_s = skip_s + train_s
+    for frame_idx, frame, _ in extract_test_frames_gen(
+        video_path,
+        coarse_rois,
+        skip_s=skip_s,
+        step=step,
+        rotate=rotate,
+        test_start_s=skip_s,
+    ):
+        if frame_idx / fps >= end_s:
+            break
+        localized_patches, localized_rois = crop_dynamic_rois(frame, coarse_rois, task_name, cfg)
+        if not localized_patches:
+            continue
+        tracker.update(frame_idx, frame, localized_patches)
+        while tracker.has_completed_unit():
+            unit = tracker.pop_unit()
+            patches.extend(_middle_unit_patches(unit["frames"], unit_trim_ratio, sample_step))
+
+    remaining = tracker.flush()
+    if remaining is not None:
+        patches.extend(_middle_unit_patches(remaining["frames"], unit_trim_ratio, sample_step))
+
+    if len(patches) < min_training_patches:
+        print(f"  Localized training patches only {len(patches)}; falling back to coarse unit training")
+        return extract_training_unit_patches(
+            video_path,
+            coarse_rois,
+            skip_s=skip_s,
+            train_s=train_s,
+            step=step,
+            rotate=rotate,
+            blur_threshold=blur_threshold,
+            motion_threshold=motion_threshold,
+            min_foreground_ratio=min_foreground_ratio,
+            foreground_threshold=foreground_threshold,
+            min_stable_frames=min_stable_frames,
+            end_gap_frames=end_gap_frames,
+            max_unit_frames=max_unit_frames,
+            bootstrap_min_saturation=bootstrap_min_saturation,
+            bootstrap_min_texture=bootstrap_min_texture,
+            presence_from_input=presence_from_input,
+            unit_trim_ratio=unit_trim_ratio,
+            sample_step=sample_step,
+            min_training_patches=min_training_patches,
+        )
+
+    print(f"  Localized training patches extracted: {len(patches)}")
     return patches
 
 

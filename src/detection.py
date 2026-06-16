@@ -119,11 +119,6 @@ class AnomalyDetector:
             for roi_features in features
         ]
         anomaly_score = float(np.max(scores))
-        if self.task_name == "taskA" and self.taskA_yellow_threshold is not None:
-            yellow_ratio = max(_taskA_yellow_ratio(p) for p in rois if p is not None and p.size > 0)
-            yellow_score = float(self.threshold) * (self.taskA_yellow_threshold / max(yellow_ratio, 1e-6))
-            return yellow_score, yellow_ratio < self.taskA_yellow_threshold
-
         is_ng = anomaly_score > self.threshold
         return anomaly_score, is_ng
 

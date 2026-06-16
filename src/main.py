@@ -32,6 +32,7 @@ from src.config import load_config
 from src.detection import AnomalyDetector
 from src.preprocessing import (
     extract_test_frames_gen,
+    extract_localized_training_unit_patches,
     extract_training_frames,
     extract_training_unit_patches,
     get_video_info,
@@ -39,6 +40,7 @@ from src.preprocessing import (
 )
 from src.tracker import UnitTracker
 from src.visualization import DashboardRenderer
+from src.locator import crop_dynamic_rois
 
 # ---------------------------------------------------------------------------
 # 类型别名
@@ -115,7 +117,30 @@ def run_task(cfg: dict) -> dict:
 
     # ---- 3. 提取训练帧 --------------------------------------------------------
     print(f"\n  [Phase 1] Extracting training frames …")
-    if cfg.get("use_unit_training", True):
+    use_dynamic = bool(cfg.get("dynamic_localization", False))
+    if use_dynamic:
+        train_patches = extract_localized_training_unit_patches(
+            video_path,
+            roi_config,
+            task_name,
+            cfg,
+            skip_s=cfg.get("skip_duration", 60),
+            train_s=cfg.get("train_duration", 120),
+            step=cfg.get("training_unit_step", 3),
+            rotate=rotate,
+            blur_threshold=cfg.get("blur_threshold", 80),
+            motion_threshold=cfg.get("motion_threshold", 6),
+            min_foreground_ratio=cfg.get("min_foreground_ratio", 0.015),
+            foreground_threshold=cfg.get("foreground_threshold", 22),
+            min_stable_frames=cfg.get("min_stable_frames", 3),
+            end_gap_frames=cfg.get("end_gap_frames", 3),
+            max_unit_frames=cfg.get("max_unit_frames", 180),
+            bootstrap_min_saturation=cfg.get("bootstrap_min_saturation", 8.0),
+            bootstrap_min_texture=cfg.get("bootstrap_min_texture", 20.0),
+            presence_from_input=cfg.get("presence_from_input", False),
+            unit_trim_ratio=cfg.get("unit_trim_ratio", 0.2),
+        )
+    elif cfg.get("use_unit_training", True):
         train_patches = extract_training_unit_patches(
             video_path,
             roi_config,
@@ -132,6 +157,7 @@ def run_task(cfg: dict) -> dict:
             max_unit_frames=cfg.get("max_unit_frames", 180),
             bootstrap_min_saturation=cfg.get("bootstrap_min_saturation", 8.0),
             bootstrap_min_texture=cfg.get("bootstrap_min_texture", 20.0),
+            presence_from_input=cfg.get("presence_from_input", False),
             unit_trim_ratio=cfg.get("unit_trim_ratio", 0.2),
         )
     else:
@@ -173,6 +199,7 @@ def run_task(cfg: dict) -> dict:
         max_unit_frames=cfg.get("max_unit_frames", 180),
         bootstrap_min_saturation=cfg.get("bootstrap_min_saturation", 8.0),
         bootstrap_min_texture=cfg.get("bootstrap_min_texture", 20.0),
+        presence_from_input=cfg.get("presence_from_input", False),
     )
 
     # 将 ROI 配置写入 cfg，供 DashboardRenderer 绘制检测框
@@ -205,6 +232,12 @@ def run_task(cfg: dict) -> dict:
         # 测试从训练结束后开始，不与训练段重叠
         test_start_s=cfg.get("skip_duration", 60) + cfg.get("train_duration", 120),
     ):
+        if use_dynamic:
+            roi_patches, display_rois = crop_dynamic_rois(full_frame, roi_config, task_name, cfg)
+            cfg["rois"] = display_rois
+            renderer.config["rois"] = display_rois
+        else:
+            display_rois = roi_config
         tracker.update(frame_idx, full_frame, roi_patches)
         frame_count += 1
 

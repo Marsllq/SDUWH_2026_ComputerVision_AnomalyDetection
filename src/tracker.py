@@ -40,6 +40,7 @@ class UnitTracker:
         background_lr: float = 0.04,
         bootstrap_min_saturation: float = 8.0,
         bootstrap_min_texture: float = 20.0,
+        presence_from_input: bool = False,
         **_: object,
     ) -> None:
         self._rois: List[Dict[str, int]] = [roi_config] if isinstance(roi_config, dict) else list(roi_config)
@@ -53,6 +54,7 @@ class UnitTracker:
         self.background_lr = float(background_lr)
         self.bootstrap_min_saturation = float(bootstrap_min_saturation)
         self.bootstrap_min_texture = float(bootstrap_min_texture)
+        self.presence_from_input = bool(presence_from_input)
 
         self._state = "IDLE"  # IDLE | COLLECTING
         self._candidate: deque[FrameRecord] = deque(maxlen=max(1, self.min_stable_frames))
@@ -77,16 +79,38 @@ class UnitTracker:
     def update(self, frame_idx: int, full_frame: np.ndarray, roi_patches: List[np.ndarray]) -> None:
         """Process one sampled video frame."""
         if not roi_patches:
+            self._handle_missing_target()
+            self.last_metrics = {
+                "motion": 0.0,
+                "blur": 0.0,
+                "foreground_ratio": 0.0,
+                "stable": False,
+                "present": False,
+                "objectness": False,
+                "state": self._state,
+                "display_state": "MOVING",
+            }
             return
 
         gray_patches = [self._to_gray(p) for p in roi_patches[: len(self._rois)] if p.size > 0]
         if not gray_patches:
+            self._handle_missing_target()
+            self.last_metrics = {
+                "motion": 0.0,
+                "blur": 0.0,
+                "foreground_ratio": 0.0,
+                "stable": False,
+                "present": False,
+                "objectness": False,
+                "state": self._state,
+                "display_state": "MOVING",
+            }
             return
 
         motion, blur, foreground_ratio = self._measure(gray_patches)
         objectness = self._objectness(roi_patches[: len(self._rois)])
         stable = motion <= self.motion_threshold and blur >= self.blur_threshold
-        present = foreground_ratio >= self.min_foreground_ratio
+        present = objectness if self.presence_from_input else foreground_ratio >= self.min_foreground_ratio
         bootstrap_present = self._bootstrap_opening_unit and stable and objectness
         if bootstrap_present:
             present = True
@@ -135,9 +159,22 @@ class UnitTracker:
                     self._bootstrap_opening_unit = False
                     if stable and not present:
                         self._update_background(gray_patches)
+                else:
+                    # A localized crop can jitter for a few frames even when the
+                    # physical part is already settled. Keep the UI in the
+                    # inspection state until the gap is long enough to end a unit.
+                    self.last_metrics["display_state"] = "INSPECTING"
 
         self._prev_gray = gray_patches
         self.last_metrics["state"] = self._state
+
+    def _handle_missing_target(self) -> None:
+        if self._state == "COLLECTING":
+            self._gap_count += 1
+            if self._gap_count >= self.end_gap_frames:
+                self._finalize_unit()
+        else:
+            self._candidate.clear()
 
     def has_completed_unit(self) -> bool:
         """Return True when at least one unit can be popped."""

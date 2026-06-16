@@ -12,9 +12,10 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.config import load_config
-from src.preprocessing import extract_training_frames, extract_training_unit_patches, get_video_info, rotate_rois
+from src.preprocessing import extract_localized_training_unit_patches, extract_training_frames, extract_training_unit_patches, get_video_info, rotate_rois
 from src.preprocessing import crop_rois
 from src.detection import AnomalyDetector
+from src.locator import crop_dynamic_rois
 from src.tracker import UnitTracker
 from src.visualization import DashboardRenderer
 import cv2
@@ -54,7 +55,24 @@ def run_demo(task_name, start_s, duration_s, speed=1.0):
 
     # ---- 训练 -------------------------------------------------------------------
     print(f"  [{task_name}] Training ...")
-    if cfg.get("use_unit_training", True):
+    use_dynamic = bool(cfg.get("dynamic_localization", False))
+    if use_dynamic:
+        train_patches = extract_localized_training_unit_patches(
+            video_path, roi_cfg if isinstance(roi_cfg, list) else [roi_cfg], task_name, cfg,
+            skip_s=skip_s, train_s=train_s,
+            step=cfg.get("training_unit_step", 3), rotate=rotate,
+            blur_threshold=cfg.get("blur_threshold", 80),
+            motion_threshold=cfg.get("motion_threshold", 6),
+            min_foreground_ratio=cfg.get("min_foreground_ratio", 0.015),
+            foreground_threshold=cfg.get("foreground_threshold", 22),
+            min_stable_frames=cfg.get("min_stable_frames", 3),
+            end_gap_frames=cfg.get("end_gap_frames", 3),
+            max_unit_frames=cfg.get("max_unit_frames", 180),
+            bootstrap_min_saturation=cfg.get("bootstrap_min_saturation", 8.0),
+            bootstrap_min_texture=cfg.get("bootstrap_min_texture", 20.0),
+            presence_from_input=cfg.get("presence_from_input", False),
+            unit_trim_ratio=cfg.get("unit_trim_ratio", 0.2))
+    elif cfg.get("use_unit_training", True):
         train_patches = extract_training_unit_patches(
             video_path, roi_cfg, skip_s=skip_s, train_s=train_s,
             step=cfg.get("training_unit_step", 3), rotate=rotate,
@@ -67,6 +85,7 @@ def run_demo(task_name, start_s, duration_s, speed=1.0):
             max_unit_frames=cfg.get("max_unit_frames", 180),
             bootstrap_min_saturation=cfg.get("bootstrap_min_saturation", 8.0),
             bootstrap_min_texture=cfg.get("bootstrap_min_texture", 20.0),
+            presence_from_input=cfg.get("presence_from_input", False),
             unit_trim_ratio=cfg.get("unit_trim_ratio", 0.2))
     else:
         train_patches = extract_training_frames(
@@ -81,8 +100,9 @@ def run_demo(task_name, start_s, duration_s, speed=1.0):
     print(f"  Threshold: {detector.threshold:.4f}")
 
     # ---- 稳定工件分件 ----------------------------------------------------------
+    tracker_rois = roi_cfg if isinstance(roi_cfg, list) else [roi_cfg]
     tracker = UnitTracker(
-        roi_cfg,
+        tracker_rois,
         motion_threshold=cfg.get("motion_threshold", 6),
         blur_threshold=cfg.get("blur_threshold", 80),
         min_foreground_ratio=cfg.get("min_foreground_ratio", 0.015),
@@ -92,9 +112,10 @@ def run_demo(task_name, start_s, duration_s, speed=1.0):
         max_unit_frames=cfg.get("max_unit_frames", 180),
         bootstrap_min_saturation=cfg.get("bootstrap_min_saturation", 8.0),
         bootstrap_min_texture=cfg.get("bootstrap_min_texture", 20.0),
+        presence_from_input=cfg.get("presence_from_input", False),
     )
     cfg["threshold"] = float(detector.threshold)
-    cfg["rois"] = roi_cfg if isinstance(roi_cfg, list) else [roi_cfg]
+    cfg["rois"] = tracker_rois
     renderer = DashboardRenderer(cfg)
 
     out_path = os.path.join(
@@ -136,7 +157,14 @@ def run_demo(task_name, start_s, duration_s, speed=1.0):
         if rotate == 180:
             frame = cv2.rotate(frame, cv2.ROTATE_180)
 
-        rois = crop_rois(frame, roi_cfg)
+        if use_dynamic:
+            rois, display_rois = crop_dynamic_rois(frame, tracker_rois, task_name, cfg)
+        else:
+            rois = crop_rois(frame, roi_cfg)
+            display_rois = tracker_rois
+
+        cfg["rois"] = display_rois
+        renderer.config["rois"] = display_rois
 
         tracker.update(frame_count, frame, rois)
 

@@ -47,6 +47,7 @@ def run_fast(task_name):
             max_unit_frames=cfg.get("max_unit_frames", 180),
             bootstrap_min_saturation=cfg.get("bootstrap_min_saturation", 8.0),
             bootstrap_min_texture=cfg.get("bootstrap_min_texture", 20.0),
+            presence_from_input=cfg.get("presence_from_input", False),
             unit_trim_ratio=cfg.get("unit_trim_ratio", 0.2))
     else:
         train_patches = extract_training_frames(
@@ -70,6 +71,7 @@ def run_fast(task_name):
         min_stable_frames=cfg.get("min_stable_frames", 3),
         end_gap_frames=cfg.get("end_gap_frames", 3),
         max_unit_frames=cfg.get("max_unit_frames", 180),
+        presence_from_input=cfg.get("presence_from_input", False),
     )
     test_start = skip_s + train_s
 
