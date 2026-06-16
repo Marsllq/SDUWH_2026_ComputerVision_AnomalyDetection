@@ -72,6 +72,12 @@ def run_fast(task_name):
         end_gap_frames=cfg.get("end_gap_frames", 3),
         max_unit_frames=cfg.get("max_unit_frames", 180),
         presence_from_input=cfg.get("presence_from_input", False),
+        presence_mode=cfg.get("presence_mode", "generic"),
+        min_present_rois=cfg.get("min_present_rois", 1),
+        no_part_max_present_rois=cfg.get("no_part_max_present_rois", 0),
+        roi_roles=cfg.get("taskB_roi_roles", []),
+        blue_presence_min=cfg.get("taskB_blue_presence_min", 0.18),
+        white_presence_min=cfg.get("taskB_white_presence_min", 0.35),
     )
     test_start = skip_s + train_s
 

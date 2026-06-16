@@ -41,6 +41,12 @@ class UnitTracker:
         bootstrap_min_saturation: float = 8.0,
         bootstrap_min_texture: float = 20.0,
         presence_from_input: bool = False,
+        presence_mode: str = "generic",
+        min_present_rois: int = 1,
+        no_part_max_present_rois: int = 0,
+        roi_roles: Optional[List[str]] = None,
+        blue_presence_min: float = 0.18,
+        white_presence_min: float = 0.35,
         **_: object,
     ) -> None:
         self._rois: List[Dict[str, int]] = [roi_config] if isinstance(roi_config, dict) else list(roi_config)
@@ -55,6 +61,12 @@ class UnitTracker:
         self.bootstrap_min_saturation = float(bootstrap_min_saturation)
         self.bootstrap_min_texture = float(bootstrap_min_texture)
         self.presence_from_input = bool(presence_from_input)
+        self.presence_mode = presence_mode
+        self.min_present_rois = int(min_present_rois)
+        self.no_part_max_present_rois = int(no_part_max_present_rois)
+        self.roi_roles = list(roi_roles or [])
+        self.blue_presence_min = float(blue_presence_min)
+        self.white_presence_min = float(white_presence_min)
 
         self._state = "IDLE"  # IDLE | COLLECTING
         self._candidate: deque[FrameRecord] = deque(maxlen=max(1, self.min_stable_frames))
@@ -80,6 +92,7 @@ class UnitTracker:
         """Process one sampled video frame."""
         if not roi_patches:
             self._handle_missing_target()
+            display_state = "WAITING" if self._is_no_part(0) else "MOVING"
             self.last_metrics = {
                 "motion": 0.0,
                 "blur": 0.0,
@@ -88,13 +101,14 @@ class UnitTracker:
                 "present": False,
                 "objectness": False,
                 "state": self._state,
-                "display_state": "MOVING",
+                "display_state": display_state,
             }
             return
 
         gray_patches = [self._to_gray(p) for p in roi_patches[: len(self._rois)] if p.size > 0]
         if not gray_patches:
             self._handle_missing_target()
+            display_state = "WAITING" if self._is_no_part(0) else "MOVING"
             self.last_metrics = {
                 "motion": 0.0,
                 "blur": 0.0,
@@ -103,18 +117,20 @@ class UnitTracker:
                 "present": False,
                 "objectness": False,
                 "state": self._state,
-                "display_state": "MOVING",
+                "display_state": display_state,
             }
             return
 
         motion, blur, foreground_ratio = self._measure(gray_patches)
-        objectness = self._objectness(roi_patches[: len(self._rois)])
+        objectness_count = self._presence_count(roi_patches[: len(self._rois)])
+        objectness = objectness_count >= self.min_present_rois
         stable = motion <= self.motion_threshold and blur >= self.blur_threshold
         present = objectness if self.presence_from_input else foreground_ratio >= self.min_foreground_ratio
         bootstrap_present = self._bootstrap_opening_unit and stable and objectness
         if bootstrap_present:
             present = True
 
+        display_state = "WAITING" if self._is_no_part(objectness_count) else "MOVING"
         self.last_metrics = {
             "motion": motion,
             "blur": blur,
@@ -122,8 +138,9 @@ class UnitTracker:
             "stable": stable,
             "present": present,
             "objectness": objectness,
+            "present_rois": objectness_count,
             "state": self._state,
-            "display_state": "MOVING",
+            "display_state": display_state,
         }
 
         record: FrameRecord = (frame_idx, full_frame, roi_patches)
@@ -175,6 +192,9 @@ class UnitTracker:
                 self._finalize_unit()
         else:
             self._candidate.clear()
+
+    def _is_no_part(self, present_count: int) -> bool:
+        return self.presence_mode == "taskB_caps" and present_count <= self.no_part_max_present_rois
 
     def has_completed_unit(self) -> bool:
         """Return True when at least one unit can be popped."""
@@ -228,8 +248,17 @@ class UnitTracker:
         for i, gray in enumerate(gray_patches):
             cv2.accumulateWeighted(gray.astype(np.float32), self._background[i], self.background_lr)
 
-    def _objectness(self, roi_patches: List[np.ndarray]) -> bool:
-        """Heuristic guard against treating an empty stable station as a part."""
+    def _presence_count(self, roi_patches: List[np.ndarray]) -> int:
+        """Count visible target subparts in the current ROI set."""
+        if self.presence_mode == "taskB_caps":
+            count = 0
+            for i, patch in enumerate(roi_patches):
+                role = self.roi_roles[i] if i < len(self.roi_roles) else "generic"
+                if _taskB_roi_present(patch, role, self.blue_presence_min, self.white_presence_min):
+                    count += 1
+            return count
+
+        count = 0
         for patch in roi_patches:
             if patch.size == 0:
                 continue
@@ -244,8 +273,8 @@ class UnitTracker:
             gray = cv2.cvtColor(sub, cv2.COLOR_BGR2GRAY)
             texture = float(cv2.Laplacian(gray, cv2.CV_64F).var())
             if sat >= self.bootstrap_min_saturation or texture >= self.bootstrap_min_texture:
-                return True
-        return False
+                count += 1
+        return count
 
     def _finalize_unit(self) -> None:
         if self._current_unit is not None and len(self._current_unit) >= self.min_stable_frames:
@@ -270,3 +299,18 @@ class UnitTracker:
     def _to_gray(roi_bgr: np.ndarray) -> np.ndarray:
         gray = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
         return cv2.resize(gray, (160, 160), interpolation=cv2.INTER_AREA)
+
+
+def _taskB_roi_present(roi_bgr: np.ndarray, role: str, blue_min: float, white_min: float) -> bool:
+    if roi_bgr is None or roi_bgr.size == 0:
+        return False
+    hsv = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2HSV)
+    if role == "blue":
+        mask = cv2.inRange(hsv, np.array([90, 45, 35], dtype=np.uint8), np.array([135, 255, 255], dtype=np.uint8))
+        return float(np.count_nonzero(mask)) / float(mask.size) >= blue_min
+    if role == "white":
+        mask = cv2.inRange(hsv, np.array([0, 0, 110], dtype=np.uint8), np.array([179, 95, 255], dtype=np.uint8))
+        return float(np.count_nonzero(mask)) / float(mask.size) >= white_min
+
+    gray = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
+    return float(cv2.Laplacian(gray, cv2.CV_64F).var()) >= 20.0

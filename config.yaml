@@ -31,6 +31,11 @@ use_unit_training: true
 training_unit_step: 3
 bootstrap_min_saturation: 8.0
 bootstrap_min_texture: 20.0
+taskB_blue_threshold_k: 2.5
+taskB_blue_min_ratio: 0.015
+taskB_color_threshold_k: 2.5
+taskB_ng_vote_ratio: 0.35
+taskB_presence_ng_vote_ratio: 0.90
 taskA_yellow_threshold_k: 2.0
 taskA_yellow_min_ratio: 0.13
 dinov2_model: vit_small_patch14_dinov2
@@ -62,6 +67,19 @@ tasks:
   taskB:
     video_path: dataset/taskB/taskB_data_video.mp4
     train_duration: 180
+    unit_score_percentile: 80.0
+    unit_threshold_margin: 1.1
+    presence_from_input: true
+    presence_mode: taskB_caps
+    min_present_rois: 3
+    no_part_max_present_rois: 1
+    taskB_roi_roles:
+    - blue
+    - white
+    - white
+    - blue
+    taskB_blue_presence_min: 0.18
+    taskB_white_presence_min: 0.35
     rois:
     - - 73
       - 708

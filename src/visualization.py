@@ -166,7 +166,7 @@ def create_dashboard_frame(
     
     # Draw ROIs
     rois = config.get("rois", [])
-    is_moving = status == "MOVING"
+    is_moving = status in {"MOVING", "WAIT", "WAITING"}
     force_ng = status == "NG"
     force_ok = status == "OK"
     for roi_idx, score, is_ng in roi_scores:

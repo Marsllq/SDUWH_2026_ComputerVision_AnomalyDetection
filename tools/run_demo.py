@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.config import load_config
 from src.preprocessing import extract_localized_training_unit_patches, extract_training_frames, extract_training_unit_patches, get_video_info, rotate_rois
 from src.preprocessing import crop_rois
-from src.detection import AnomalyDetector
+from src.detection import AnomalyDetector, PerRoiAnomalyDetector
 from src.locator import crop_dynamic_rois
 from src.tracker import UnitTracker
 from src.visualization import DashboardRenderer
@@ -23,6 +23,8 @@ import numpy as np
 
 
 def score_rois(detector, roi_patches):
+    if hasattr(detector, "score_rois"):
+        return detector.score_rois(roi_patches)
     scores = []
     for i, patch in enumerate(roi_patches):
         score, is_ng = detector.score_frame([patch])
@@ -71,6 +73,12 @@ def run_demo(task_name, start_s, duration_s, speed=1.0):
             bootstrap_min_saturation=cfg.get("bootstrap_min_saturation", 8.0),
             bootstrap_min_texture=cfg.get("bootstrap_min_texture", 20.0),
             presence_from_input=cfg.get("presence_from_input", False),
+            presence_mode=cfg.get("presence_mode", "generic"),
+            min_present_rois=cfg.get("min_present_rois", 1),
+            no_part_max_present_rois=cfg.get("no_part_max_present_rois", 0),
+            roi_roles=cfg.get("taskB_roi_roles", []),
+            blue_presence_min=cfg.get("taskB_blue_presence_min", 0.18),
+            white_presence_min=cfg.get("taskB_white_presence_min", 0.35),
             unit_trim_ratio=cfg.get("unit_trim_ratio", 0.2))
     elif cfg.get("use_unit_training", True):
         train_patches = extract_training_unit_patches(
@@ -86,6 +94,12 @@ def run_demo(task_name, start_s, duration_s, speed=1.0):
             bootstrap_min_saturation=cfg.get("bootstrap_min_saturation", 8.0),
             bootstrap_min_texture=cfg.get("bootstrap_min_texture", 20.0),
             presence_from_input=cfg.get("presence_from_input", False),
+            presence_mode=cfg.get("presence_mode", "generic"),
+            min_present_rois=cfg.get("min_present_rois", 1),
+            no_part_max_present_rois=cfg.get("no_part_max_present_rois", 0),
+            roi_roles=cfg.get("taskB_roi_roles", []),
+            blue_presence_min=cfg.get("taskB_blue_presence_min", 0.18),
+            white_presence_min=cfg.get("taskB_white_presence_min", 0.35),
             unit_trim_ratio=cfg.get("unit_trim_ratio", 0.2))
     else:
         train_patches = extract_training_frames(
@@ -95,8 +109,20 @@ def run_demo(task_name, start_s, duration_s, speed=1.0):
             motion_threshold=cfg.get("motion_threshold", 6))
     print(f"  Patches: {len(train_patches)}")
 
-    detector = AnomalyDetector(cfg)
-    detector.train(train_patches)
+    if task_name == "taskB" and isinstance(roi_cfg, list) and len(roi_cfg) > 1:
+        roi_count = len(roi_cfg)
+        grouped = [train_patches[i::roi_count] for i in range(roi_count)]
+        detector = PerRoiAnomalyDetector(cfg, roi_count=roi_count)
+        detector.train(grouped)
+        for i in range(roi_count):
+            print(
+                f"  ROI#{i + 1}: patches={len(grouped[i])}, "
+                f"patchcore_thr={detector.detectors[i].threshold:.4f}, "
+                f"color_thr={detector.color_thresholds[i]:.3f}"
+            )
+    else:
+        detector = AnomalyDetector(cfg)
+        detector.train(train_patches)
     print(f"  Threshold: {detector.threshold:.4f}")
 
     # ---- 稳定工件分件 ----------------------------------------------------------
@@ -113,6 +139,12 @@ def run_demo(task_name, start_s, duration_s, speed=1.0):
         bootstrap_min_saturation=cfg.get("bootstrap_min_saturation", 8.0),
         bootstrap_min_texture=cfg.get("bootstrap_min_texture", 20.0),
         presence_from_input=cfg.get("presence_from_input", False),
+        presence_mode=cfg.get("presence_mode", "generic"),
+        min_present_rois=cfg.get("min_present_rois", 1),
+        no_part_max_present_rois=cfg.get("no_part_max_present_rois", 0),
+        roi_roles=cfg.get("taskB_roi_roles", []),
+        blue_presence_min=cfg.get("taskB_blue_presence_min", 0.18),
+        white_presence_min=cfg.get("taskB_white_presence_min", 0.35),
     )
     cfg["threshold"] = float(detector.threshold)
     cfg["rois"] = tracker_rois
@@ -183,8 +215,18 @@ def run_demo(task_name, start_s, duration_s, speed=1.0):
             }
             last_roi_scores = roi_scores
             results.append({"id": unit["id"], "score": max_s, "status": status})
+            unit_start_s = start_s + unit["frames"][0][0] / fps
+            unit_end_s = start_s + unit["frames"][-1][0] / fps
             print(f"  Unit #{unit['id']}: {'❌ NG' if is_ng else '✅ OK'} "
-                  f"(max={max_s:.4f})")
+                  f"({unit_start_s:.1f}s-{unit_end_s:.1f}s, max={max_s:.4f})")
+            if task_name == "taskB" and hasattr(detector, "last_unit_debug") and detector.last_unit_debug:
+                roi_debug = []
+                for d in detector.last_unit_debug:
+                    mark = "!" if d["patchcore_ng"] or d["presence_ng"] else " "
+                    roi_debug.append(
+                        f"{mark}R{d['roi'] + 1}:{d['score']:.3f}/{d['threshold']:.3f},p={d['presence_ratio']:.2f}"
+                    )
+                print("    " + " | ".join(roi_debug))
 
         current_ui = last_unit_info if last_unit_info else {
             "unit_id": 0, "status": "WAIT", "mean_score": 0, "max_score": 0,
@@ -202,7 +244,7 @@ def run_demo(task_name, start_s, duration_s, speed=1.0):
             live_score_cache = None
             if current_ui.get("is_completed"):
                 current_ui["completed_status"] = current_ui.get("status", "OK")
-            current_ui["status"] = "MOVING"
+            current_ui["status"] = "WAIT" if display_state == "WAITING" else "MOVING"
         elif not completed_this_frame:
             current_unit_id = current_ui.get("unit_id", 0)
             if current_unit_id != last_live_unit_id:

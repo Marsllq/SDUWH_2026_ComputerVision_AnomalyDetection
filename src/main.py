@@ -200,6 +200,12 @@ def run_task(cfg: dict) -> dict:
         bootstrap_min_saturation=cfg.get("bootstrap_min_saturation", 8.0),
         bootstrap_min_texture=cfg.get("bootstrap_min_texture", 20.0),
         presence_from_input=cfg.get("presence_from_input", False),
+        presence_mode=cfg.get("presence_mode", "generic"),
+        min_present_rois=cfg.get("min_present_rois", 1),
+        no_part_max_present_rois=cfg.get("no_part_max_present_rois", 0),
+        roi_roles=cfg.get("taskB_roi_roles", []),
+        blue_presence_min=cfg.get("taskB_blue_presence_min", 0.18),
+        white_presence_min=cfg.get("taskB_white_presence_min", 0.35),
     )
 
     # 将 ROI 配置写入 cfg，供 DashboardRenderer 绘制检测框
@@ -298,7 +304,7 @@ def run_task(cfg: dict) -> dict:
             live_score_cache = None
             if live_info.get("is_completed"):
                 live_info["completed_status"] = live_info.get("status", "OK")
-            live_info["status"] = "MOVING"
+            live_info["status"] = "WAIT" if display_state == "WAITING" else "MOVING"
         elif not completed_this_frame:
             current_unit_id = live_info.get("unit_id", "-")
             if current_unit_id != last_live_unit_id:
