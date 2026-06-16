@@ -1,0 +1,84 @@
+skip_duration: 60
+train_duration: 120
+step_train: 30
+step_test: 3
+motion_threshold: 6.0
+blur_threshold: 15.0
+min_foreground_ratio: 0.015
+foreground_threshold: 22
+min_stable_frames: 3
+end_gap_frames: 3
+max_unit_frames: 180
+use_dynamic_roi: true
+detection_method: hsv
+hsv_range:
+- 15
+- 80
+- 80
+hsv_range_upper:
+- 35
+- 255
+- 255
+coreset_ratio: 0.1
+knn_k: 3
+threshold_k: 3.0
+score_aggregation: mean_top5
+unit_trim_ratio: 0.2
+unit_score_percentile: 80.0
+unit_threshold_margin: 1.03
+live_score_interval: 5
+use_unit_training: true
+training_unit_step: 3
+bootstrap_min_saturation: 8.0
+bootstrap_min_texture: 20.0
+taskA_yellow_threshold_k: 3.0
+taskA_yellow_min_ratio: 0.10
+dinov2_model: vit_small_patch14_dinov2
+input_size: 224
+device: auto
+viz_width: 1920
+viz_height: 1080
+fps_output: 15
+tasks:
+  taskA:
+    video_path: dataset/taskA/taskA_data_video.mp4
+    fixed_roi:
+    - 556
+    - 352
+    - 501
+    - 494
+    dynamic_roi_size:
+    - 350
+    - 300
+    abnormal_times: []
+    abnormal_start_s: 374
+    rotate: 0
+  taskB:
+    video_path: dataset/taskB/taskB_data_video.mp4
+    rois:
+    - - 73
+      - 708
+      - 154
+      - 72
+    - - 142
+      - 633
+      - 145
+      - 74
+    - - 127
+      - 148
+      - 156
+      - 79
+    - - 73
+      - 63
+      - 139
+      - 68
+    dynamic_roi_size:
+    - 350
+    - 300
+    abnormal_times:
+    - 272
+    - 949
+    - 1047
+    - 1072
+    rotate: 180
+    rotate_rois_with_frame: true

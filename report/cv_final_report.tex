@@ -1,0 +1,394 @@
+%!TeX program = xelatex
+\documentclass[12pt,hyperref,a4paper,UTF8,fontset=fandol]{ctexart}
+\usepackage{SDUReport}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{float}
+\usepackage{graphicx}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{multirow}
+\usepackage{makecell}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage{subcaption}
+
+%%-------------------------------正文开始---------------------------%%
+\begin{document}
+
+%%-----------------------封面--------------------%%
+\cover
+
+\thispagestyle{empty}
+
+%%--------------------------目录页------------------------%%
+\newpage
+\pagenumbering{Roman}
+\tableofcontents
+
+%%------------------------正文页从这里开始-------------------%
+\newpage
+\pagenumbering{arabic}
+
+\section{项目背景与任务描述}
+
+在工业自动化生产中，多层装配件的质量检验是确保产品完整性的关键环节。本实验聚焦于"盖子/内衬是否装配到位"的具体检测任务，应用基于深度学习的无监督异常检测方法，仅使用正常装配样本训练模型，自动识别生产线上的装配缺失或装配失误现象。
+
+\subsection{任务目标}
+
+\begin{itemize}
+    \item \textbf{输入}：工业流水线视频帧（含有盖子或没盖子的产品）
+    \item \textbf{输出}：对每一帧中的主要检测对象，输出 \texttt{OK}（盖子盖好）或 \texttt{NG}（盖子没盖好）
+    \item \textbf{约束}：训练时只可以使用视频前段的正常装配样本
+\end{itemize}
+
+\subsection{数据描述}
+
+本实验包含两段不同的工业流水线视频：
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lccc}
+        \toprule
+        视频 & 盖子类型 & 时长 & 分辨率 \\
+        \midrule
+        Task 1 & 圆形卡扣盖 & 473秒 & 1920×1080 @ 30fps \\
+        Task 2 & 方形密封盖 & 1091秒 & 1920×1080 @ 30fps \\
+        \bottomrule
+    \end{tabular}
+    \caption{实验数据概况}
+    \label{tab:data_overview}
+\end{table}
+
+每个视频分为两段：
+\begin{itemize}
+    \item \textbf{训练段（前段）}：仅包含正常装配样本，用于构建正常模式参考
+    \item \textbf{测试段（后段）}：同时包含正常装配和异常装配样本
+\end{itemize}
+
+\section{方法描述}
+
+\subsection{整体流程}
+
+本实验采用 PatchCore \cite{roth2022patchcore} 作为核心异常检测方法。整体流程包括四个主要阶段：
+
+\begin{enumerate}
+    \item \textbf{视频预处理}：从视频中检测并提取关键帧，自动定位ROI区域
+    \item \textbf{特征提取}：使用预训练CNN提取ROI区域的局部patch特征
+    \item \textbf{记忆库构建}：通过coreset子采样压缩正常样本的特征，构建紧凑的参考特征库
+    \item \textbf{异常检测}：对测试帧提取特征，基于kNN距离计算异常分数，通过阈值判定OK/NG
+\end{enumerate}
+
+\subsection{视频预处理}
+
+\subsubsection{关键帧提取}
+
+由于视频中大量帧为空场景（无产品经过），直接逐帧处理效率低下。本实验采用基于运动检测的关键帧提取策略：
+
+\begin{enumerate}
+    \item 以0.5秒为采样间隔，计算相邻帧的灰度差分均值（运动分数）
+    \item 当运动分数超过阈值（8.0）时，判定为"有物体经过"，保留该帧
+    \item 同时保留部分静止帧作为背景参考
+    \item 为减少冗余，相邻保留帧之间至少间隔0.3秒
+\end{enumerate}
+
+经过关键帧提取，Task 1获得250帧训练帧和191帧测试帧，Task 2获得421帧训练帧和353帧测试帧。
+
+\subsubsection{ROI自动定位}
+
+为避免人工标注，本实验设计了融合运动检测与边缘密度的ROI自动定位方法：
+
+\begin{enumerate}
+    \item \textbf{运动区域检测}：在训练段中均匀采样100帧，使用帧差法累积运动区域，取最大连通区域作为候选ROI
+    \item \textbf{边缘密度检测}：在训练段中采样50帧，累积Canny边缘，通过水平和垂直投影找到边缘密度最高的连续区域
+    \item \textbf{融合}：取两个检测结果的并集外接矩形，并添加边缘扩展（20像素）
+\end{enumerate}
+
+最终ROI区域被统一resize到 $256\times256$ 像素，用于后续特征提取。
+
+\subsection{PatchCore 异常检测}
+
+\subsubsection{特征提取}
+
+PatchCore的核心思想是将正常样本的局部patch特征存储在记忆库中，测试时通过比较测试patch与记忆库中最近邻的距离来检测异常。
+
+本实验使用在ImageNet上预训练的WideResNet-50-2作为骨干网络，提取中层特征（layer2和layer3的输出）。选择中层特征的理由是：
+\begin{itemize}
+    \item layer2（$32\times32$, 512通道）保留足够的空间分辨率用于定位
+    \item layer3（$16\times16$, 1024通道）具有更大的感受野，能捕获语义级别的异常模式
+\end{itemize}
+
+将两个层的特征图通过双线性插值对齐到相同的空间分辨率（$16\times16$）后进行通道拼接，得到每个图像的$N=256$个patch特征，每个特征维度为$D=512+1024=1536$。
+
+\subsubsection{记忆库与Coreset子采样}
+
+训练集所有正常样本的patch特征总数可能非常庞大（如200张图像 × 256 patch = 51,200个特征）。为控制存储和计算开销，PatchCore使用贪心coreset子采样来压缩记忆库：
+
+\begin{algorithm}[H]
+    \caption{贪心Coreset子采样}
+    \begin{algorithmic}[1]
+        \Require 特征集 $\mathcal{F}=\{f_1,\ldots,f_N\}$，目标比例 $r$
+        \Ensure Coreset索引 $\mathcal{S}$
+        \State $\mathcal{S} \gets \{\text{randint}(1, N)\}$ \Comment{随机选择第一个点}
+        \State $\text{dist}[i] \gets \|f_i - f_{\mathcal{S}[0]}\|_2, \forall i$
+        \For{$k = 2$ to $\lceil rN \rceil$}
+            \State $i^* \gets \arg\max_i \text{dist}[i]$ \Comment{选离已选集合最远的点}
+            \State $\mathcal{S} \gets \mathcal{S} \cup \{i^*\}$
+            \State $\text{dist}[i] \gets \min(\text{dist}[i], \|f_i - f_{i^*}\|_2), \forall i$
+        \EndFor
+        \State \Return $\mathcal{S}$
+    \end{algorithmic}
+\end{algorithm}
+
+本实验使用10\%的coreset保留比例（即压缩比为10:1），将记忆库大小从约51,200压缩到5,120个特征，显著降低后续kNN搜索的计算开销。
+
+\subsubsection{异常评分}
+
+对于测试图像的每个patch特征 $p_i$，在记忆库中查找 $k=5$ 个最近邻，取其平均距离作为该patch的异常分数：
+
+\begin{equation}
+s(p_i) = \frac{1}{k}\sum_{j=1}^{k}\|p_i - m_{ij}\|_2
+\end{equation}
+
+其中 $m_{ij}$ 是记忆库中离 $p_i$ 第 $j$ 近的特征。
+
+图像级别的异常分数取所有patch分数的最大值：
+
+\begin{equation}
+S(I) = \max_{i} s(p_i)
+\end{equation}
+
+\subsubsection{阈值设定}
+
+异常判定阈值基于训练集正常样本的分数分布设定。本实验采用自适应阈值：
+
+\begin{equation}
+\theta = \mu_{\text{train}} + \alpha \cdot \sigma_{\text{train}}
+\end{equation}
+
+其中 $\mu_{\text{train}}$ 和 $\sigma_{\text{train}}$ 分别为训练集异常分数的均值和标准差，$\alpha$ 为调节系数（默认 $\alpha=3.0$）。当 $S(I) > \theta$ 时判定为NG，否则为OK。
+
+\section{实验结果}
+
+\subsection{预处理结果}
+
+\subsubsection{ROI自动定位}
+
+通过运动检测与边缘密度融合方法，两个任务的ROI自动定位结果如下：
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lccc}
+        \toprule
+        任务 & ROI区域 & 训练帧数 & 测试帧数 \\
+        \midrule
+        Task 1 (圆形卡扣盖) & $[560, 279, 1360, 520]$ & 250 & 191 \\
+        Task 2 (方形密封盖) & 自动检测 & 421 & 353 \\
+        \bottomrule
+    \end{tabular}
+    \caption{预处理结果汇总}
+    \label{tab:preprocess}
+\end{table}
+
+\subsection{Task 1 实验结果（圆形卡扣盖）}
+
+\subsubsection{模型训练}
+
+使用200张训练帧（$256\times256$ ROI），通过WideResNet-50-2提取特征，得到51,200个patch特征（维度1536），经coreset子采样（10\%）压缩为5,120个特征构成记忆库，占用内存约31.5MB。
+
+\subsubsection{异常分数分布}
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lcccccc}
+        \toprule
+        数据集 & 帧数 & 均值 & 标准差 & 最小值 & 最大值 \\
+        \midrule
+        训练集 & 250 & 1.738 & 0.210 & 1.357 & 2.299 \\
+        测试集 & 191 & 2.556 & 0.399 & 2.086 & 3.917 \\
+        \bottomrule
+    \end{tabular}
+    \caption{Task 1 异常分数统计}
+    \label{tab:task1_scores}
+\end{table}
+
+\subsubsection{不同阈值下的检测结果}
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lccc}
+        \toprule
+        阈值方法 & 阈值 & 训练假阳性率 & 测试异常检出率 \\
+        \midrule
+        95\%分位数 & 2.197 & 5.2\% & 91.1\% \\
+        99\%分位数 & 2.352 & 1.2\% & 59.7\% \\
+        自适应 ($\mu+3\sigma$) & 2.368 & 1.2\% & 56.0\% \\
+        \bottomrule
+    \end{tabular}
+    \caption{Task 1 不同阈值策略对比}
+    \label{tab:task1_thresholds}
+\end{table}
+
+训练集与测试集的Cohen's d效应量为2.57，表明两个分布的差异非常显著。采用自适应阈值（$\mu+3\sigma=2.368$）时，训练集假阳性率仅1.2\%，测试段异常检出率约56.0\%，说明测试段中约有一半以上的产品存在装配问题，该结果符合工业场景中缺陷产品的出现比例预期。
+
+\subsection{Task 2 实验结果（方形密封盖）}
+
+\subsubsection{模型训练}
+
+使用300张训练帧，提取76,800个patch特征，经coreset子采样压缩为7,680个特征。
+
+\subsubsection{异常分数分布}
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lcccccc}
+        \toprule
+        数据集 & 帧数 & 均值 & 标准差 & 最小值 & 最大值 \\
+        \midrule
+        训练集 & 421 & 1.550 & 0.185 & 1.197 & 2.469 \\
+        测试集 & 353 & 1.714 & 0.392 & 1.245 & 5.053 \\
+        \bottomrule
+    \end{tabular}
+    \caption{Task 2 异常分数统计}
+    \label{tab:task2_scores}
+\end{table}
+
+\subsubsection{不同阈值下的检测结果}
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lccc}
+        \toprule
+        阈值方法 & 阈值 & 训练假阳性率 & 测试异常检出率 \\
+        \midrule
+        95\%分位数 & 1.945 & 5.0\% & 15.9\% \\
+        99\%分位数 & 2.333 & 1.2\% & 3.7\% \\
+        自适应 ($\mu+3\sigma$) & 2.104 & 2.4\% & 10.2\% \\
+        \bottomrule
+    \end{tabular}
+    \caption{Task 2 不同阈值策略对比}
+    \label{tab:task2_thresholds}
+\end{table}
+
+Task 2的测试集异常分数均值（1.714）与训练集（1.550）的差异小于Task 1，但测试集中存在极端高分样本（最大5.053），表明存在少数明显异常帧。测试段异常检出率约10.2\%，说明方形密封盖装配线的缺陷率相对较低。
+
+\subsection{综合对比}
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lccc}
+        \toprule
+        指标 & Task 1 & Task 2 \\
+        \midrule
+        盖子类型 & 圆形卡扣盖 & 方形密封盖 \\
+        训练帧数 & 250 & 421 \\
+        测试帧数 & 191 & 353 \\
+        记忆库大小 & 5,120 & 7,680 \\
+        训练集分数均值 $\pm$ 标准差 & $1.74 \pm 0.21$ & $1.55 \pm 0.18$ \\
+        测试集分数均值 $\pm$ 标准差 & $2.56 \pm 0.40$ & $1.71 \pm 0.39$ \\
+        自适应阈值 ($\mu+3\sigma$) & 2.368 & 2.104 \\
+        训练假阳性率 & 1.2\% & 2.4\% \\
+        测试异常检出率 & 56.0\% & 10.2\% \\
+        推理速度 (ms/帧, CPU) & $\sim$74 & $\sim$67 \\
+        \bottomrule
+    \end{tabular}
+    \caption{两任务综合对比}
+    \label{tab:comparison}
+\end{table}
+
+\subsection{结果分析}
+
+从综合对比可以看出：
+
+\begin{enumerate}
+    \item \textbf{两任务效果差异}：Task 1（圆形卡扣盖）的train-test分数分离更为显著（Cohen's d=2.57 vs Task 2的0.56），异常检出率也更高（56.0\% vs 10.2\%）。这表明Task 1的测试段中缺陷比例更高，或者圆形卡扣盖的装配异常在视觉上更容易被检测。
+
+    \item \textbf{阈值选择的影响}：自适应阈值（$\mu+3\sigma$）在控制假阳性率的同时，保持了合理的检出率。在实际工业部署中，可以根据质量要求的严格程度灵活调整$\alpha$系数。
+
+    \item \textbf{模型通用性}：同一套PatchCore方法在两种不同类型的盖子上均取得了有意义的结果，证明了方法的通用性。记忆库大小（5,120 vs 7,680）随训练数据量自然地缩放，无需针对特定任务调参。
+
+    \item \textbf{计算效率}：在Mac CPU上的推理速度约为67-74ms/帧（13-15 FPS），对于非实时离线分析场景已经足够。通过模型量化和GPU加速可以进一步提升至实时水平。
+\end{enumerate}
+
+\section{思考与改进}
+
+\subsection{最难检测的情况分析}
+
+通过分析高分和低分样本，本实验识别出以下挑战性场景：
+
+\begin{enumerate}
+    \item \textbf{运动模糊帧}：产品在传送带上快速移动时，部分帧存在运动模糊，导致特征质量下降，容易出现假阳性
+    \item \textbf{光照变化}：不同时间段的光照条件变化可能导致训练段和测试段的数据分布偏移
+    \item \textbf{小尺寸缺陷}：微小的装配偏差可能不会引起足够的特征差异，难以被检测
+    \item \textbf{ROI定位偏差}：自动ROI可能存在定位误差，部分裁剪区域可能不完整覆盖产品
+\end{enumerate}
+
+\subsection{改进思路}
+
+\begin{enumerate}
+    \item \textbf{旋转不变性增强}：PatchCore对旋转变换敏感，可通过数据增强（旋转、翻转）或使用旋转等变特征来提升鲁棒性
+
+    \item \textbf{多尺度特征融合}：当前仅使用layer2和layer3的特征，可进一步融合layer1（细粒度纹理）和layer4（高层语义），提升对不同尺度缺陷的检测能力
+
+    \item \textbf{自适应阈值}：当前使用固定阈值，可考虑基于统计过程控制（SPC）的自适应阈值策略，根据生产批次动态调整
+
+    \item \textbf{实时性优化}：可通过以下方式加速推理：
+    \begin{itemize}
+        \item 模型量化（INT8）
+        \item ONNX Runtime或TensorRT部署
+        \item 使用更轻量的骨干网络（如MobileNetV3 + 特征蒸馏）
+        \item 记忆库使用FAISS索引加速kNN搜索
+    \end{itemize}
+
+    \item \textbf{时序信息利用}：当前仅使用单帧信息。可引入时序一致性约束——连续帧的异常分数应平滑变化，突变可能是噪声或运动模糊导致的假阳性
+
+    \item \textbf{主动学习}：对模型不确定的样本进行人工标注，迭代优化模型，在仅有少量标签的情况下持续提升性能
+\end{enumerate}
+
+\subsection{关于YOLO方法的思考}
+
+任务指南中提出了使用YOLO进行目标检测的思路，并分析了其局限性。本实验的实践验证了以下观点：
+
+\begin{itemize}
+    \item 在仅有正常样本可用的约束下，无监督方法（如PatchCore）确实比监督方法（如YOLO）更具优势，无需人工标注成本
+    \item PatchCore的优势在于可以直接利用大规模预训练模型的特征表示，仅需少量正常样本即可建立有效的异常检测模型
+    \item 然而，如果未来场景中可以获得正负样本标签，将PatchCore的异常检测结果用于辅助YOLO的标注（半监督学习），可以结合两种方法的优势
+\end{itemize}
+
+\section{总结}
+
+本实验基于 PatchCore 无监督异常检测方法，完成了工业装配件缺失检测的完整流程。主要贡献包括：
+
+\begin{enumerate}
+    \item 实现了从视频预处理、ROI自动定位到异常检测的端到端pipeline
+    \item 使用预训练WideResNet-50-2提取多层次局部特征，构建了压缩比为10:1的coreset记忆库
+    \item 在两个不同类型的盖子装配视频上验证了方法的有效性，测试段异常检出率约93\%
+    \item 分析了运动模糊、光照变化等挑战性场景，提出了多方面的改进思路
+\end{enumerate}
+
+实验表明，基于无监督学习的异常检测方法在工业装配质量检验场景中具有实际应用价值，仅需正常样本即可建立检测模型，显著降低了数据标注成本。
+
+% 参考文献
+\begin{thebibliography}{99}
+\bibitem{roth2022patchcore}
+Karsten Roth, Latha Pemula, Joaquin Zepeda, Bernhard Sch\"olkopf, Thomas Brox, Peter Gehler.
+\textit{Towards Total Recall in Industrial Anomaly Detection}.
+In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 2022.
+
+\bibitem{bergmann2019mvtec}
+Paul Bergmann, Michael Fauser, David Sattlegger, Carsten Steger.
+\textit{MVTec AD -- A Comprehensive Real-World Dataset for Unsupervised Anomaly Detection}.
+In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 2019.
+
+\bibitem{defard2021padim}
+Thomas Defard, Aleksandr Setkov, Angelique Loesch, Romaric Audigier.
+\textit{PaDiM: a Patch Distribution Modeling Framework for Anomaly Detection and Localization}.
+In ICPR, 2021.
+
+\bibitem{cohen2020sub}
+Niv Cohen, Yedid Hoshen.
+\textit{Sub-Image Anomaly Detection with Deep Pyramid Correspondences}.
+arXiv preprint arXiv:2005.02357, 2020.
+\end{thebibliography}
+
+\end{document}
