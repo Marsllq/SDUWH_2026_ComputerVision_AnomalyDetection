@@ -6,6 +6,25 @@
 \usepackage{float}
 \usepackage{graphicx}
 \usepackage{hyperref}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{caption}
+
+\setlength{\parskip}{0.55em}
+\setlength{\parindent}{2em}
+\renewcommand{\arraystretch}{1.25}
+\linespread{1.18}
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    columns=fullflexible,
+    frame=single,
+    numbers=left,
+    numberstyle=\tiny,
+    tabsize=4
+}
 
 \begin{document}
 
@@ -19,136 +38,820 @@
 \newpage
 \pagenumbering{arabic}
 
-\section{任务背景与要求}
+\section{摘要}
 
-本项目完成两段工业流水线视频中的装配件缺失检测。视频前段只包含正常装配样本，测试段同时包含正常件与异常件。系统需要在不使用异常样本训练的条件下，对每个稳定到位的工件输出 \texttt{OK} 或 \texttt{NG}，并在演示视频中显示 ROI、检测分数与状态。
+本报告围绕“基于计算机视觉的工业装配件缺失检测”大作业展开，目标是在只有正常样本可用于训练的条件下，对两段工业流水线视频中的装配件进行自动质检，并输出 \texttt{OK} 或 \texttt{NG}。项目最终实现了一套完整的无监督异常检测流程：视频预处理、ROI 定位、稳定工件分件、DINOv2 特征提取、PatchCore 记忆库建模、按件异常评分、结果可视化和演示视频生成。
 
-作业指南要求包含三部分产物：预处理、训练和推理代码；能够展示缺盖案例的短演示视频；以及说明方法、结果和改进思路的 PDF 报告。本项目的代码入口为 \texttt{tools/run\_demo.py}，核心模块位于 \texttt{src/}，最终演示视频输出到 \texttt{results/}。
+本项目的核心思路是把“盖子是否装配到位”转化为正常模式建模问题。训练阶段只使用视频前段的正常装配数据，不引入异常样本或手工异常标签；推理阶段将当前工件的局部视觉特征与训练阶段建立的正常特征库进行比较，当局部结构、纹理、颜色或形态偏离正常模式时，异常分数升高，从而判定为 \texttt{NG}。相比直接训练 YOLO 等有监督检测器，该方案更适合本作业的小样本、弱标注和异常稀缺场景。
 
-\section{总体方案}
+针对两段视频的差异，项目采用了不同的工程处理。Task A 的主要问题是圆形端面位置存在轻微漂移，因此增加了动态定位模块，对端面进行逐帧对齐，再进行单 ROI PatchCore 检测。Task B 的一个工件包含四个帽位，并且帽位外观存在蓝色与白色差异，因此采用四个 ROI 独立 PatchCore 检测，并增加帽位颜色存在性作为辅助兜底。系统只在工件稳定到位后检测，空场景、进入过程、离开过程均不输出最终 OK/NG，从而降低运动模糊和半进入状态引起的误报。
 
-系统采用无监督异常检测路线。训练阶段只从正常装配片段中提取稳定工件的 ROI patch，使用预训练 DINOv2 ViT-S/14 提取 patch token 特征，并用 PatchCore 记忆库进行最近邻异常评分。测试阶段按工件分组，对稳定区间采样评分，并聚合为单件 OK/NG 结果。
+最终产物包括代码、报告 PDF 和演示视频。GitHub 仓库链接暂以占位符表示：\url{https://github.com/PLACEHOLDER/cv-industrial-assembly-inspection}。最终演示视频位于 \texttt{results/taskA\_15s\_demo.mp4} 与 \texttt{results/taskB\_15s\_demo.mp4}，均包含正常件与异常件案例。Task B 的 15 秒演示从较长回归视频的中间区间截取，包含 1072 秒附近的明显异常工件，并保留前后正常工件作为对照。
 
-整体流程如下：
+\newpage
+\section*{符号、缩写与状态定义}
+\addcontentsline{toc}{section}{符号、缩写与状态定义}
 
-\begin{enumerate}
-    \item 跳过视频前 60 秒抖动片段。
-    \item 根据固定 ROI 或动态定位得到检测区域。
-    \item 通过运动、模糊、前景与存在性门控，只在工件稳定到位时检测。
-    \item 对训练段正常 ROI 提取 DINOv2 patch 特征，建立 PatchCore memory bank。
-    \item 对测试段每件工件计算异常分数，超过阈值判定为 \texttt{NG}。
-    \item 使用仪表盘视频显示当前状态、分数、ROI 框与 OK/NG 结果。
+\begin{longtable}{p{0.22\textwidth}p{0.68\textwidth}}
+\toprule
+符号或缩写 & 含义 \\
+\midrule
+ROI & Region of Interest，感兴趣区域，表示每帧中真正参与检测的局部区域。 \\
+OK & 当前稳定工件符合正常装配状态。 \\
+NG & 当前稳定工件偏离正常装配状态，需要复核或告警。 \\
+WAIT & 当前没有完整工件进入检测区域，暂不输出质量判定。 \\
+MOVING & 工件正在进入或离开检测区域，尚未稳定，暂不输出最终质量判定。 \\
+INSPECTING & 工件稳定到位，系统开始计算异常分数并输出 OK/NG。 \\
+DINOv2 & 自监督视觉表征模型，本项目使用 ViT-S/14 版本提取 patch token 特征。 \\
+PatchCore & 基于正常 patch 特征记忆库和最近邻距离的无监督异常检测方法。 \\
+Memory Bank & 正常训练样本的 patch 特征集合，用于测试阶段最近邻查询。 \\
+$z$ & 一个 ROI patch 对应的局部特征向量。 \\
+$\mathcal{M}$ & 正常样本记忆库。 \\
+$d(z,\mathcal{M})$ & 测试特征到正常记忆库的最近邻距离或聚合距离。 \\
+$\theta$ & 异常判定阈值，由训练段正常分数分布估计。 \\
+TP/TN/FP/FN & 真阳性、真阴性、假阳性、假阴性。本文若进行标准统计，NG 为正类。 \\
+FPS & 每秒处理帧数，用于表示推理或视频生成效率。 \\
+\bottomrule
+\caption{符号、缩写与状态定义}
+\end{longtable}
+
+\newpage
+\section{绪论}
+
+\subsection{工业装配件缺失检测的实际意义}
+
+工业流水线上的装配件检测通常面临高节拍、重复性强、人工疲劳和异常样本少等问题。装配件缺失看似是简单的二分类问题，但在真实视频中会受到运动模糊、反光、相机角度、工件进入姿态、遮挡和背景机械结构的影响。若直接对每一帧做分类，模型很容易把进入过程、局部反光或机械夹具误识别为异常。因此，本项目首先把检测对象从“单帧”提升到“稳定到位的工件单元”，再对工件单元进行异常判断。
+
+作业给出的数据具有两个关键特点。第一，训练段只包含正常装配样本，异常样本只出现在测试段，因此不能使用常规监督学习直接训练 OK/NG 分类器。第二，两段视频对应不同产品形态，Task A 和 Task B 的 ROI 结构、运动方式、异常外观均不同，算法必须具备一定通用性，不能只依赖某一个视频中的特殊颜色或固定位置。
+
+\subsection{作业要求拆解}
+
+根据 \texttt{guide.md}，本作业的核心要求可以拆解为以下几项：
+
+\begin{enumerate}[label=\arabic*.]
+    \item 完成预处理代码，包括视频解析、关键帧或稳定工件提取、ROI 定位和可视化。
+    \item 实现深度异常检测方法，可复现或改进 PatchCore，也可使用其他无监督或自监督方法。
+    \item 在测试段上输出检测结果，并对准确率、召回率、推理速度或稳定性进行分析。
+    \item 生成短演示视频，展示原始画面、处理后结果和 ROI 检测，且包含“没盖盖子”的案例。
+    \item 提交 PDF 报告，说明方法、结果、困难情况和改进思路。
 \end{enumerate}
 
-\section{预处理与分件}
+本项目对应这些要求的实现如下：预处理与稳定分件由 \texttt{src/preprocessing.py} 和 \texttt{src/tracker.py} 完成；特征提取由 \texttt{src/feature\_extractor.py} 完成；PatchCore 记忆库与评分由 \texttt{src/memory\_bank.py} 完成；Task A 与 Task B 的最终检测逻辑由 \texttt{src/detection.py} 完成；演示视频由 \texttt{tools/run\_demo.py} 与 \texttt{src/visualization.py} 完成。
 
-\subsection{稳定工件检测}
+\subsection{为什么选择无监督异常检测}
 
-流水线视频中存在空场景、进入和离开过程、运动模糊以及工件只露出一部分的情况。若逐帧检测，会产生大量误报。因此本项目实现了按件检测：当工件进入 ROI 后，\texttt{UnitTracker} 根据帧差、前景比例、模糊度和最小稳定帧数建立一个工件单元；只有单元稳定时才送入检测器。
+本项目没有选择 YOLO 或传统监督分类器作为主方法，主要原因是异常样本不足和标注成本高。若使用 YOLO，需要为每张图片标注盖子、缺失位置和异常类别，而本作业提供的数据并不包含这样的标注。即使从视频中人工截取少量异常帧，也会面临类别不平衡、过拟合和泛化性不足的问题。
 
-对于无工件或半进入状态，系统只显示 \texttt{WAIT} 或 \texttt{MOVING}，不输出 OK/NG，从而符合实际质检中“到位后判定”的要求。
+无监督异常检测的优势在于，它只需要正常样本即可学习“正常外观分布”。对于工业质检场景，正常样本通常大量存在，而异常样本稀缺且类型多变。PatchCore 的思想与这一场景高度匹配：将正常样本的局部 patch 特征构成记忆库，测试时比较当前 patch 与记忆库最近邻的距离。只要异常导致局部结构与正常样本差异明显，就会得到较高异常分数。
 
-\subsection{Task A 动态定位}
+\newpage
+\section{作业要求分析与任务建模}
 
-Task A 中圆形端面位置会有轻微漂移。项目在固定参考 ROI 的基础上加入动态定位模块 \texttt{src/locator.py}，在每帧中定位端面区域并裁剪对齐 patch。该处理降低了位置漂移对 PatchCore 分数的影响。
+\subsection{数据组成}
 
-Task A 当前使用动态 ROI、DINOv2 特征和 PatchCore 判定，并额外通过端面颜色比例辅助识别盖子缺失后的黄色内衬区域。
-
-\subsection{Task B 多帽位 ROI}
-
-Task B 的一个工件包含 4 个关键帽位。项目为 4 个帽位分别设置 ROI，并在视频旋转 180 度后同步旋转 ROI。4 个帽位角色为：蓝、白、白、蓝。系统要求至少 3 个帽位可见且稳定时才进入检测，避免半进入或半离开工件被误判。
-
-\section{核心算法}
-
-\subsection{DINOv2 特征提取}
-
-项目使用 \texttt{timm} 加载 \texttt{vit\_small\_patch14\_dinov2}。每个 ROI 被缩放到统一输入尺寸，送入模型后取 patch token 作为局部特征。与手工颜色阈值相比，DINOv2 特征能同时表达边缘、结构、纹理和部件形态；与有监督检测器相比，它不需要异常标注。
-
-\subsection{PatchCore 记忆库}
-
-训练段中的正常 patch 特征构成候选特征集合。为降低存储和 kNN 搜索开销，系统使用 coreset 子采样压缩 memory bank。测试时，对每个 patch 特征计算其到正常 memory bank 最近邻的距离，并按 \texttt{mean\_top5} 聚合为 ROI 异常分数。
-
-阈值由训练段正常分数自适应估计：
-
-\begin{equation}
-    \theta = \mu_{train} + k \cdot \sigma_{train}
-\end{equation}
-
-其中 $k$ 由配置文件中的 \texttt{threshold\_k} 控制。
-
-\subsection{Task B 独立 ROI PatchCore}
-
-Task B 若把四个帽位混在同一个 memory bank 中，会削弱每个帽位的局部差异。因此最终方案对四个 ROI 分别训练 PatchCore，每个帽位拥有独立阈值。单件检测时，只要任一 ROI 的聚合分数超过对应阈值，就判定该工件为 \texttt{NG}。
-
-此外，Task B 针对蓝色和白色帽位分别计算颜色存在性比例。颜色存在性不作为主判定，而作为 PatchCore 的兜底信号：只有持续、明显低于训练正常分布时才触发 NG。最终配置中 \texttt{taskB\_presence\_ng\_vote\_ratio=0.90}，避免轻微反光或白色区域波动造成误报。
-
-\section{实验结果}
-
-\subsection{演示视频}
-
-最终演示视频位于：
-
-\begin{itemize}
-    \item \texttt{results/taskA\_demo\_result.mp4}
-    \item \texttt{results/taskB\_demo\_result.mp4}
-\end{itemize}
-
-演示视频包含工件状态、OK/NG 结果、异常分数、阈值和 ROI 框。空场景与运动过程显示为等待或移动状态，不作为质检结果计数。
-
-\subsection{Task A 结果}
-
-Task A 使用动态定位后的单 ROI PatchCore。训练段仅使用正常装配样本，测试时按件聚合。经过动态定位后，端面漂移导致的误报显著减少；盖子缺失时，端面纹理和颜色变化会使 PatchCore 分数升高，并被判定为 \texttt{NG}。
-
-\subsection{Task B 结果}
-
-Task B 最终使用 \texttt{1040s--1075s} 附近片段作为短演示窗口，该窗口包含两个明显异常工件。50 秒源视频回归时，系统输出 10 件，其中 8 件 \texttt{OK}、2 件 \texttt{NG}；两个 \texttt{NG} 分别对应 1047 秒和 1072 秒附近的异常工件。生成 15 秒提交演示时，使用同一异常区间的 2 倍速短片。
+项目数据位于 \texttt{dataset/} 目录下，包含 Task A 与 Task B 两个视频。两个视频均为工业流水线俯视或近俯视视角，视频中工件沿固定方向经过检测区域。前段视频主要为正常装配样本，后段包含正常与异常混合样本。
 
 \begin{table}[H]
     \centering
-    \begin{tabular}{lccc}
+    \begin{tabular}{llll}
         \toprule
-        片段 & 工件数 & OK & NG \\
+        任务 & 视频路径 & 主要检测对象 & 最终策略 \\
         \midrule
-        Task B 1040s--1090s 回归片段 & 10 & 8 & 2 \\
-        Task B 250s--300s 回归片段 & 8 & 6 & 2 \\
-        Task B 930s--980s 压力测试片段 & 11 & 8 & 3 \\
+        Task A & \texttt{dataset/taskA/taskA\_data\_video.mp4} & 圆形端面盖/内衬 & 动态定位 + 单 ROI PatchCore \\
+        Task B & \texttt{dataset/taskB/taskB\_data\_video.mp4} & 四个帽位 & 四 ROI 独立 PatchCore \\
         \bottomrule
     \end{tabular}
-    \caption{Task B 回归测试结果}
+    \caption{数据与最终策略概览}
 \end{table}
 
-\section{速度与工程实现}
+Task A 中，一个工件主要关注一个圆形端面区域。异常时，端面内部结构和颜色暴露，表现为黄色内衬或不同纹理。Task B 中，一个工件包含四个关键帽位，两端为蓝色帽位，中间两个为白色帽位。异常通常表现为帽位缺失、装配不到位或局部结构明显偏离正常外观。
 
-系统按 \texttt{step\_test=3} 抽帧检测，并对一个工件内部的稳定帧进行采样聚合，避免逐帧重复计算。PatchCore 使用 coreset 压缩 memory bank，减少 kNN 搜索成本。演示视频以 2 倍速输出，当前配置下 Task B 30 秒源视频生成约 15 秒演示视频，满足短视频展示要求。
+\subsection{输入输出定义}
 
-主要代码结构如下：
-
-\begin{itemize}
-    \item \texttt{src/preprocessing.py}：视频读取、旋转、ROI 裁剪、训练样本提取。
-    \item \texttt{src/tracker.py}：工件稳定状态机与按件分组。
-    \item \texttt{src/locator.py}：Task A 动态端面定位。
-    \item \texttt{src/feature\_extractor.py}：DINOv2 特征提取。
-    \item \texttt{src/memory\_bank.py}：PatchCore memory bank、coreset 和 kNN 评分。
-    \item \texttt{src/detection.py}：单 ROI 与多 ROI 异常检测器。
-    \item \texttt{src/visualization.py}：演示视频仪表盘与 ROI 可视化。
-    \item \texttt{tools/run\_demo.py}：训练、测试、可视化视频生成入口。
-\end{itemize}
-
-\section{困难情况与改进}
-
-本任务中最难处理的是运动过程、反光、半进入工件和多帽位差异。Task A 的主要问题是端面位置漂移，因此加入动态定位。Task B 的主要问题是四个帽位外观不同，因此采用 per-ROI PatchCore，而不是把所有帽位混成一个模型。
-
-后续可继续改进的方向包括：
+系统输入为视频帧，实际处理时并不是直接对所有帧输出结果，而是先将帧组织成工件单元。每个工件单元包含从进入检测区域到离开检测区域的一系列帧，其中稳定到位的中间部分用于最终评分。系统输出包括：
 
 \begin{itemize}
-    \item 将 DINOv2 特征缓存到磁盘，减少重复生成演示视频时的训练时间。
-    \item 使用 FAISS 或 ONNX/TensorRT 加速最近邻搜索和特征推理。
-    \item 为 Task B 增加少量可解释的结构模板，仅用于展示异常位置，不替代 PatchCore 主判定。
-    \item 引入自动评估脚本，对已知异常时间点计算召回率和误报率。
+    \item 单件检测状态：\texttt{OK} 或 \texttt{NG}。
+    \item 异常分数：PatchCore 输出的局部异常聚合分数。
+    \item ROI 可视化：在视频中标出当前检测区域。
+    \item 状态面板：显示运动门控、模糊门控、当前分数和阈值。
 \end{itemize}
 
-\section{结论}
+该设计与真实质检逻辑一致：当工件还没进入检测区域或正在运动时，不应立即输出质量判定；只有工件稳定、ROI 完整可见时，检测结果才有意义。
 
-项目完成了从视频预处理、ROI 定位、无监督模型训练、按件推理到结果可视化的完整流程。Task A 通过动态定位提升了稳定性，Task B 通过多 ROI PatchCore 解决了四个帽位差异明显的问题。最终产物满足作业指南中对代码、演示视频和报告的要求，并保持训练阶段只使用正常样本。
+\subsection{训练与测试约束}
+
+训练时只使用视频前段正常样本，项目通过 \texttt{skip\_duration} 跳过开头抖动，再在 \texttt{train\_duration} 范围内提取稳定工件 patch。异常样本仅用于测试和演示，不进入训练集。该约束在代码中通过训练样本提取函数和配置文件控制，避免了测试异常信息泄漏到模型中。
+
+\newpage
+\section{系统总体设计}
+
+\subsection{模块划分}
+
+项目采用模块化结构，便于调试和复用。核心目录如下：
+
+\begin{longtable}{p{0.27\textwidth}p{0.63\textwidth}}
+\toprule
+模块 & 功能说明 \\
+\midrule
+\texttt{src/config.py} & 加载 \texttt{config.yaml}，合并全局配置和任务级配置。 \\
+\texttt{src/preprocessing.py} & 视频读取、旋转、ROI 裁剪、训练 patch 提取、ROI 坐标旋转。 \\
+\texttt{src/tracker.py} & 使用运动、前景和模糊信息对工件分件，输出稳定工件单元。 \\
+\texttt{src/locator.py} & Task A 动态端面定位，根据当前画面调整 ROI。 \\
+\texttt{src/feature\_extractor.py} & 加载 DINOv2，并提取 patch token 特征。 \\
+\texttt{src/memory\_bank.py} & 构建 PatchCore memory bank，执行 coreset 子采样和 kNN 评分。 \\
+\texttt{src/detection.py} & 定义单 ROI 检测器和 Task B 多 ROI 检测器。 \\
+\texttt{src/visualization.py} & 生成带状态面板、ROI 框和 OK/NG 结果的可视化帧。 \\
+\texttt{tools/run\_demo.py} & 演示入口：训练、测试、分件、评分和视频写出。 \\
+\bottomrule
+\caption{项目主要模块}
+\end{longtable}
+
+\subsection{端到端流程}
+
+端到端流程可以概括为“正常样本建模 + 稳定工件推理”。训练阶段从前段正常视频提取 patch，推理阶段从后段视频按件检测。由于 DINOv2 和 PatchCore 均在 ROI patch 上工作，ROI 的稳定性对最终效果非常重要。
+
+\begin{figure}[H]
+    \centering
+    \fbox{\parbox{0.86\textwidth}{
+    视频读取 $\rightarrow$ 跳过抖动 $\rightarrow$ ROI 定位 $\rightarrow$ 稳定工件分件 $\rightarrow$ DINOv2 特征提取 $\rightarrow$ PatchCore 记忆库 $\rightarrow$ kNN 异常评分 $\rightarrow$ 按件聚合 $\rightarrow$ OK/NG 可视化
+    }}
+    \caption{系统端到端流程示意}
+\end{figure}
+
+\subsection{配置驱动设计}
+
+项目使用 \texttt{config.yaml} 管理全局参数与任务级参数。全局参数包括 DINOv2 模型、输入尺寸、PatchCore 阈值系数、抽帧步长、可视化尺寸等。任务级参数覆盖具体视频路径、ROI、旋转角度、训练时长和 presence 门控阈值。
+
+配置驱动的好处是，Task A 与 Task B 可以共享同一套代码框架，只在配置中表达差异。例如 Task A 启用 \texttt{dynamic\_localization}，Task B 启用 \texttt{presence\_mode: taskB\_caps} 并配置四个 ROI。
+
+\newpage
+\section{视频预处理与 ROI 定位}
+
+\subsection{稳定工件分件}
+
+\subsubsection{跳过开头抖动}
+
+实际视频开头存在摄像机或产线状态不稳定的问题。若把这些帧加入训练集，会污染正常样本分布。因此配置中设置 \texttt{skip\_duration: 60}，训练和测试默认跳过前 60 秒。这一设置看似简单，但对无监督异常检测很关键，因为 PatchCore 的阈值完全来自正常训练分数，一旦训练集中混入抖动、空场景或不完整工件，阈值会被拉高或 memory bank 会学习到错误模式。
+
+\subsubsection{运动与前景门控}
+
+\texttt{UnitTracker} 负责判断当前是否存在完整工件，以及当前工件是否进入稳定检测阶段。它使用以下信息：
+
+\begin{itemize}
+    \item 相邻帧差分得到的运动分数。
+    \item ROI 内前景占比，用于区分空场景与有工件状态。
+    \item 拉普拉斯方差，用于粗略过滤严重模糊帧。
+    \item 连续稳定帧数，用于避免进入瞬间误判。
+\end{itemize}
+
+在输出上，系统区分 \texttt{WAITING}、\texttt{MOVING} 和 \texttt{INSPECTING}。只有 \texttt{INSPECTING} 状态下才进行实时评分或最终评分。这样可以避免将半个工件、残影或夹具移动误判为异常。
+
+\subsubsection{按件聚合}
+
+对单帧直接判定容易受到瞬时反光或噪声影响。因此系统在一个工件单元内取中间稳定帧，并按固定步长采样。评分时先得到多帧分数，再用分位数聚合为单件分数。Task B 最终使用 \texttt{unit\_score\_percentile: 80.0} 和 \texttt{unit\_threshold\_margin: 1.1}，在召回明显异常与降低误报之间取得平衡。
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lll}
+        \toprule
+        参数 & 当前值 & 作用 \\
+        \midrule
+        \texttt{skip\_duration} & 60 & 跳过开头抖动 \\
+        \texttt{step\_test} & 3 & 测试抽帧步长 \\
+        \texttt{min\_stable\_frames} & 3/5 & 最小稳定帧数 \\
+        \texttt{unit\_trim\_ratio} & 0.2 & 去除进入和离开边缘帧 \\
+        \texttt{max\_unit\_frames} & 180 & 单件最大持续帧数 \\
+        \bottomrule
+    \end{tabular}
+    \caption{稳定分件相关参数}
+\end{table}
+
+\newpage
+\subsection{ROI 定位策略}
+
+\subsubsection{固定 ROI 与动态 ROI 的取舍}
+
+ROI 决定了模型真正观察的区域。固定 ROI 简单、稳定、运行快，但当工件位置有漂移时，固定 ROI 会裁到背景或偏离关键结构。动态 ROI 更复杂，但能够适应位置变化。项目中 Task A 和 Task B 的特点不同，因此采用不同策略。
+
+Task A 的圆形端面在画面中有小范围漂移，固定 ROI 容易引入背景变化，因此使用动态定位。Task B 的四个帽位位置相对固定，且工件经过时四个帽位会按顺序完整出现在右侧区域，因此使用旋转后的固定多 ROI 更稳。
+
+\subsubsection{Task A 动态端面定位}
+
+Task A 的动态定位模块位于 \texttt{src/locator.py}。它以配置中的固定 ROI 作为参考，在当前帧中寻找端面附近的稳定结构，然后输出对齐后的局部 patch。动态定位并不改变异常检测算法，只是使输入 patch 更稳定。对于 PatchCore 而言，这等价于降低了由位置误差引起的正常分数波动。
+
+\subsubsection{Task B 四帽位 ROI}
+
+Task B 的视频需要旋转 180 度后处理。配置中原始 ROI 会通过 \texttt{rotate\_rois} 与画面同步旋转。四个 ROI 分别对应蓝、白、白、蓝四个帽位。独立 ROI 的好处是，每个帽位只与自身正常样本比较，不会让蓝色帽位和白色帽位互相污染特征分布。
+
+\begin{longtable}{ccccc}
+\toprule
+ROI & 原始 $x$ & 原始 $y$ & 宽 & 高 \\
+\midrule
+1 & 73 & 708 & 154 & 72 \\
+2 & 142 & 633 & 145 & 74 \\
+3 & 127 & 148 & 156 & 79 \\
+4 & 73 & 63 & 139 & 68 \\
+\bottomrule
+\caption{Task B 原始 ROI 配置}
+\end{longtable}
+
+\newpage
+\section{DINOv2 特征与 PatchCore 异常检测}
+
+\subsection{DINOv2 特征提取}
+
+\subsubsection{选择 DINOv2 的原因}
+
+PatchCore 原论文常使用 WideResNet 特征，但本项目最终使用 DINOv2 ViT-S/14。DINOv2 是自监督视觉表征模型，具备较强的通用局部特征表达能力。对于工业装配件，异常可能表现为颜色变化、边缘缺失、结构不连续或局部零件缺失。单纯 HSV 阈值很难覆盖这些情况，而 DINOv2 patch token 能同时表达纹理和结构差异。
+
+另一个原因是，本项目不希望依赖异常样本。DINOv2 的预训练知识来自大规模图像自监督学习，它可以作为通用特征提取器，而 PatchCore 只需要基于当前任务的正常样本建立 memory bank。这符合本作业“训练时只使用正常样本”的约束。
+
+\subsubsection{特征提取过程}
+
+每个 ROI patch 先缩放到配置中的输入尺寸，然后送入 DINOv2 模型。模型输出包含全局 token 和 patch tokens，项目取 patch tokens 作为局部特征。每个 patch token 对应图像中的一个局部区域，局部异常会导致对应 token 与正常 memory bank 的距离增大。
+
+在代码层面，\texttt{src/feature\_extractor.py} 负责加载模型并调用 \texttt{forward\_features}。为了兼容不同设备，配置中 \texttt{device: auto} 会自动选择可用计算设备。特征提取输出为每张 ROI 图像的一组 patch 特征，供 PatchCore 记忆库使用。
+
+\subsubsection{特征与传统颜色规则的关系}
+
+项目中并没有完全放弃颜色信息。Task A 的黄色内衬比例、Task B 的蓝白帽位 presence 都作为辅助信号存在。但这些规则不是主分类器，而是对 PatchCore 的补充。这样做的原因是：颜色规则可解释、速度快，但容易受光照和反光影响；DINOv2+PatchCore 更稳健，但对非常局部、颜色明确的缺失可以通过颜色规则增强召回。
+
+\newpage
+\subsection{PatchCore 异常检测方法}
+
+\subsubsection{正常样本 memory bank}
+
+PatchCore 的核心思想是保存正常样本的局部特征集合。设训练集中所有正常 ROI 的 patch 特征为 $\mathcal{F}=\{f_1,f_2,\ldots,f_N\}$。如果直接保存全部特征，存储和最近邻搜索成本会较高，因此项目使用 coreset 子采样压缩 memory bank。
+
+\begin{equation}
+    \mathcal{M} = \operatorname{Coreset}(\mathcal{F}, r)
+\end{equation}
+
+其中 $r$ 为保留比例，当前配置为 \texttt{coreset\_ratio: 0.1}。这意味着只保留约 10\% 的代表性正常 patch 特征，既降低计算成本，又尽量覆盖正常分布的多样性。
+
+\subsubsection{kNN 异常评分}
+
+测试时，对当前 ROI 的每个 patch 特征 $p_i$，在 memory bank 中查找最近的 $k$ 个正常特征，并根据距离计算异常分数。项目中距离采用归一化特征上的近邻距离，聚合方式为 \texttt{mean\_top5}。
+
+\begin{equation}
+    s(p_i)=\frac{1}{k}\sum_{j=1}^{k} d(p_i, m_{ij})
+\end{equation}
+
+其中 $m_{ij}$ 是 memory bank 中第 $j$ 个最近邻。图像或 ROI 级别的分数由局部 patch 分数聚合得到。若局部区域与正常样本差异很大，对应 patch 的距离会增大，从而推高整体异常分数。
+
+\subsubsection{阈值校准}
+
+阈值来自训练集正常分数分布。设训练分数均值为 $\mu$，标准差为 $\sigma$，阈值为：
+
+\begin{equation}
+    \theta = \mu + k\sigma
+\end{equation}
+
+其中 $k$ 对应配置中的 \texttt{threshold\_k}。这种阈值方式不需要异常样本，适合本作业设置。实际工程中，Task B 又对单件分数加了 margin，避免正常波动刚好越过阈值。
+
+\newpage
+\section{Task A：圆形端面装配状态检测}
+
+\subsection{Task A 难点}
+
+Task A 的检测对象是单个圆形端面。该任务看似简单，但存在两个问题。第一，端面位置不是完全固定，固定 ROI 会把背景边缘或夹具区域裁入 patch。第二，异常不一定只表现为颜色变化，也可能表现为内部结构、纹理和反光模式变化。因此最终方案使用动态定位对齐 ROI，再用 DINOv2+PatchCore 建模正常端面。
+
+\subsection{训练样本提取}
+
+Task A 配置中启用了 \texttt{dynamic\_localization: true}，训练阶段调用 \texttt{extract\_localized\_training\_unit\_patches}。训练段只使用稳定工件中间帧，避免进入和离开阶段。最近一次生成演示时，Task A 提取到 243 个 localized training patches，PatchCore 阈值为 0.2199。
+
+\subsection{异常判定}
+
+Task A 的最终分数由 PatchCore 输出。由于缺盖后可能露出黄色内衬，代码中也保留了黄色比例辅助检查。这个辅助检查只针对 Task A 生效，不影响 Task B。最终演示片段为 360s--390s，输出 5 件，其中 2 件 OK、3 件 NG，NG 出现在 374s 之后的异常区域。
+
+\begin{figure}[H]
+    \centering
+    \begin{minipage}{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{figures/cv_project/taskA_ok.png}
+        \caption*{Task A 正常件示例}
+    \end{minipage}
+    \hfill
+    \begin{minipage}{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{figures/cv_project/taskA_ng.png}
+        \caption*{Task A 异常件示例}
+    \end{minipage}
+    \caption{Task A 演示视频截图}
+\end{figure}
+
+\newpage
+\section{Task B：多帽位装配状态检测}
+
+\subsection{Task B 难点}
+
+Task B 的难点在于一个工件包含四个帽位，且四个帽位外观不同。如果把四个 ROI 混入同一个 PatchCore 模型，memory bank 会同时包含蓝色帽位和白色帽位的正常特征，导致某些局部差异被平均掉。早期实验也表明，单一模型对四帽位缺失不够稳定。因此最终采用 per-ROI PatchCore。
+
+\subsection{四 ROI 独立建模}
+
+Task B 训练阶段先提取稳定工件的 ROI patch，再按 ROI 编号分组。每组 patch 单独训练一个 \texttt{AnomalyDetector}，得到四个独立的 memory bank 和阈值。最近一次演示的训练结果如下：
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{ccccc}
+        \toprule
+        ROI & 角色 & 训练 patch 数 & PatchCore 阈值 & 颜色 presence 阈值 \\
+        \midrule
+        1 & blue & 135 & 0.1622 & 0.323 \\
+        2 & white & 135 & 0.1765 & 0.463 \\
+        3 & white & 135 & 0.2044 & 0.659 \\
+        4 & blue & 135 & 0.1788 & 0.304 \\
+        \bottomrule
+    \end{tabular}
+    \caption{Task B per-ROI 训练结果}
+\end{table}
+
+\subsection{presence 辅助门控}
+
+Task B 的四个帽位有明确颜色角色，因此可以计算蓝色或白色区域占比。但颜色阈值不能作为唯一判定，因为白色帽位受反光影响较大。最终方案将 presence 作为辅助兜底：只有当某个帽位在稳定帧中持续低于正常颜色阈值，且比例超过 \texttt{taskB\_presence\_ng\_vote\_ratio=0.90} 时，才通过 presence 触发 NG。这样可以避免 ROI3 白色区域的轻微波动造成误报。
+
+\subsection{最终演示片段}
+
+Task B 的 15 秒演示从 1050s--1080s 源片段生成，2.2 倍速输出，时长约 15.02 秒。该片段来自较长回归视频 1040s--1090s 的中间位置，包含 1072s 附近的明显异常，同时保留多个正常工件用于对照。
+
+\begin{figure}[H]
+    \centering
+    \begin{minipage}{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{figures/cv_project/taskB_ok.png}
+        \caption*{Task B 正常件示例}
+    \end{minipage}
+    \hfill
+    \begin{minipage}{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{figures/cv_project/taskB_ng.png}
+        \caption*{Task B 异常件示例}
+    \end{minipage}
+    \caption{Task B 演示视频截图}
+\end{figure}
+
+\newpage
+\section{可视化设计与工程输出}
+
+\subsection{演示视频布局}
+
+作业要求演示视频能够展示原始画面、处理后结果及 ROI 检测。项目中的 \texttt{DashboardRenderer} 将画面渲染成统一尺寸的视频帧。左侧为状态面板，显示任务名、当前状态、异常分数、阈值、工件编号等信息；右侧为视频画面，叠加 ROI 框和检测结果。
+
+可视化的重点不是追求复杂 UI，而是让老师能够快速看懂：当前是否有工件、是否正在检测、哪个区域被检测、当前分数是否超过阈值、最终结果是 OK 还是 NG。
+
+\subsection{状态显示逻辑}
+
+系统不会在空场景或半进入状态显示 OK/NG，而是显示等待或移动状态。这一点在演示中很重要，因为直接逐帧显示 OK/NG 会造成误解：没有工件时显示 OK 并不代表检测通过，运动中显示 NG 也不代表质量异常。项目将状态拆分为 \texttt{WAIT}、\texttt{MOVING}、\texttt{OK}、\texttt{NG}，让演示逻辑与质检流程一致。
+
+\subsection{ROI 分数解释}
+
+Task B 调试阶段曾输出每个 ROI 的分数、阈值和 presence 异常比例。最终提交时，这些详细日志默认关闭，只保留在配置开关 \texttt{demo\_debug\_rois} 中。这样报告和答辩时仍可以解释每个 ROI 的贡献，但正式演示视频不会被调试信息干扰。
+
+\newpage
+\section{实验结果与分析}
+
+\subsection{Task A 演示结果}
+
+Task A 15 秒演示使用 360s--390s 源片段，2.2 倍速输出。该片段包含从正常工件到异常工件的变化，最终输出 5 件：2 件 OK，3 件 NG。该结果说明动态定位后的 PatchCore 能够识别异常端面，并在异常段持续输出 NG。
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{ccccc}
+        \toprule
+        片段 & 源时长 & 输出时长 & OK & NG \\
+        \midrule
+        Task A 360s--390s & 30s & 15.03s & 2 & 3 \\
+        \bottomrule
+    \end{tabular}
+    \caption{Task A 15 秒演示结果}
+\end{table}
+
+\subsection{Task B 演示结果}
+
+Task B 15 秒演示使用 1050s--1080s 源片段，2.2 倍速输出。该片段输出 7 件：5 件 OK，2 件 NG。第一个 NG 来自 1050s 左右延续的异常尾部，第二个 NG 对应 1072s 附近的明显异常。由于该片段截取自较长回归视频的中间区域，视觉节奏比只截取异常点更自然。
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{ccccc}
+        \toprule
+        片段 & 源时长 & 输出时长 & OK & NG \\
+        \midrule
+        Task B 1050s--1080s & 30s & 15.02s & 5 & 2 \\
+        \bottomrule
+    \end{tabular}
+    \caption{Task B 15 秒演示结果}
+\end{table}
+
+\subsection{Task B 长片段回归}
+
+为验证 15 秒演示不是偶然选段，项目还对多个 50 秒片段进行了回归。1040s--1090s 是最终主要回归片段，输出 10 件，其中 8 件 OK，2 件 NG，两个 NG 对应 1047s 和 1072s 附近的明显异常。250s--300s 片段能够命中 272s 附近异常，但存在一个轻微 ROI2 越界；930s--980s 片段作为压力测试，会出现 3 个 NG，其中部分更接近反光或姿态变化造成的高分。
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lccccl}
+        \toprule
+        片段 & 工件数 & OK & NG & 主要异常点 & 备注 \\
+        \midrule
+        250s--300s & 8 & 6 & 2 & 272s & 保留弱异常召回，存在轻微 R2 越界 \\
+        930s--980s & 11 & 8 & 3 & 压力测试 & 部分高分疑似姿态或反光变化 \\
+        1040s--1090s & 10 & 8 & 2 & 1047s, 1072s & 最干净的最终展示长片段 \\
+        \bottomrule
+    \end{tabular}
+    \caption{Task B 多片段回归结果}
+\end{table}
+
+\newpage
+\section{参数调试、速度与鲁棒性分析}
+
+\subsection{参数调试过程}
+
+\subsubsection{Task A 调试思路}
+
+Task A 的调试重点是定位稳定性。早期固定 ROI 在端面漂移时容易出现分数波动，后来加入动态定位模块后，训练 patch 更集中，正常件分数更稳定。Task A 当前配置中 \texttt{motion\_threshold: 8.0}、\texttt{min\_stable\_frames: 5}，比全局默认更严格，目的是减少端面运动过程进入训练和测试聚合。
+
+\subsubsection{Task B 从模板匹配回到 PatchCore}
+
+Task B 曾尝试“帽位存在性 + 模板匹配”的策略。该策略直观、可解释，但在实际视频中对反光、局部遮挡和姿态变化不够稳，容易把正常波动当作模板不匹配，或者漏掉结构不明显但 DINOv2 特征差异大的异常。最终根据测试结果回到 per-ROI PatchCore，并保留 presence 作为辅助。
+
+\subsubsection{Task B 阈值取舍}
+
+Task B 的主要取舍是召回弱异常与减少误报。若提高 \texttt{unit\_threshold\_margin}，250s 片段中的弱异常可能漏检；若降低 margin，930s 压力片段误报增加。最终采用 \texttt{unit\_score\_percentile: 80.0} 和 \texttt{unit\_threshold\_margin: 1.1}，同时把 presence 投票调到 0.90，保证明显缺失和结构异常被命中，减少白色帽位反光导致的误报。
+
+\newpage
+\subsection{速度与资源分析}
+
+\subsubsection{抽帧与按件采样}
+
+视频逐帧处理成本较高，而相邻帧高度相似。项目使用 \texttt{step\_test: 3} 抽帧，并在工件内部再按 \texttt{sample\_step} 采样。这种策略显著减少重复计算，同时保留足够时间分辨率用于质检演示。
+
+\subsubsection{Coreset 降低 kNN 成本}
+
+PatchCore 的 kNN 搜索复杂度与 memory bank 大小直接相关。项目使用 0.1 的 coreset ratio，将正常 patch 特征压缩到较小的代表性集合。对于本作业规模，使用 NumPy/Scikit-learn 级别的 kNN 搜索已经能够完成演示生成；若进一步追求实时性，可引入 FAISS 或 ONNX/TensorRT 加速。
+
+\subsubsection{演示生成速度}
+
+演示脚本每次运行会重新训练当前任务检测器，然后生成视频。这样设计更简单、可复现，但重复生成视频时会浪费特征提取时间。后续可以把训练好的 memory bank 缓存到磁盘，演示时直接加载，从而缩短生成时间。
+
+\newpage
+\subsection{误报、漏报与鲁棒性分析}
+
+\subsubsection{运动状态误报}
+
+运动状态是工业视频异常检测中最常见的误报来源。工件刚进入 ROI 时，ROI 中只有一部分产品，PatchCore 会认为它与完整正常件不同，从而产生高分。项目通过 \texttt{WAITING/MOVING/INSPECTING} 状态拆分解决这个问题。只有进入 \texttt{INSPECTING} 后的稳定帧才用于最终判断。
+
+\subsubsection{反光与白色帽位}
+
+Task B 的白色帽位容易受到灯光和透明壳体反光影响。早期 presence 投票比例较低时，ROI3 会因为白色比例短时下降触发 NG。将 \texttt{taskB\_presence\_ng\_vote\_ratio} 提高到 0.90 后，只有持续明显缺失才由 presence 触发，从而降低误报。
+
+\subsubsection{弱异常与阈值边界}
+
+弱异常的分数可能只比阈值略高，例如 250s--300s 片段中的 272s 附近异常。若为了消除所有压力测试误报而继续抬高阈值，弱异常会被漏掉。因此最终参数保留了对弱异常的召回能力，并选择更干净、视觉更明确的 1040s--1090s 片段作为主要展示区间。
+
+\newpage
+\section{工程实现与复现}
+
+\subsection{与作业要求的对应关系}
+
+\begin{longtable}{p{0.25\textwidth}p{0.35\textwidth}p{0.30\textwidth}}
+\toprule
+作业要求 & 本项目实现 & 对应文件/产物 \\
+\midrule
+预处理代码 & 视频读取、旋转、ROI 裁剪、稳定分件、动态定位 & \texttt{src/preprocessing.py}, \texttt{src/tracker.py}, \texttt{src/locator.py} \\
+深度方法 & DINOv2 特征 + PatchCore memory bank + kNN 评分 & \texttt{src/feature\_extractor.py}, \texttt{src/memory\_bank.py} \\
+结果可视化 & 左侧状态面板、右侧视频、ROI 框、OK/NG 状态 & \texttt{src/visualization.py} \\
+演示视频 & Task A 与 Task B 约 15 秒短视频，均包含 NG 案例 & \texttt{results/taskA\_15s\_demo.mp4}, \texttt{results/taskB\_15s\_demo.mp4} \\
+报告 PDF & 方法、结果、分析和改进讨论 & \texttt{report/cv\_final\_report.pdf} \\
+GitHub 链接 & 预留占位符，待上传后替换 & \url{https://github.com/PLACEHOLDER/cv-industrial-assembly-inspection} \\
+\bottomrule
+\caption{作业要求与项目产物对应关系}
+\end{longtable}
+
+\newpage
+\subsection{代码组织与可复现性}
+
+\subsubsection{运行环境}
+
+项目依赖 PyTorch、timm、OpenCV、NumPy、Scikit-learn、Matplotlib、PyYAML、Pillow 和 tqdm。依赖记录在 \texttt{requirements.txt} 中，可通过以下命令安装：
+
+\begin{lstlisting}[language=bash]
+pip install -r requirements.txt
+\end{lstlisting}
+
+\subsubsection{生成演示视频}
+
+Task A 演示视频生成命令：
+
+\begin{lstlisting}[language=bash]
+python tools/run_demo.py taskA 360 30 2.2
+\end{lstlisting}
+
+Task B 演示视频生成命令：
+
+\begin{lstlisting}[language=bash]
+python tools/run_demo.py taskB 1050 30 2.2
+\end{lstlisting}
+
+\subsubsection{复现实验结果}
+
+如果需要复现 Task B 长片段回归，可运行：
+
+\begin{lstlisting}[language=bash]
+python tools/run_demo.py taskB 1040 50 2
+python tools/run_demo.py taskB 250 50 2
+python tools/run_demo.py taskB 930 50 2
+\end{lstlisting}
+
+这些命令会重新训练检测器并覆盖 \texttt{results/taskB\_demo\_result.mp4}，因此正式提交视频已另存为 \texttt{taskB\_15s\_demo.mp4}。
+
+\newpage
+\section{方法对比、改进分析与总结}
+
+\subsection{创新点与不足}
+
+\subsubsection{创新点}
+
+本项目的创新点主要体现在工程适配层面。首先，系统不是简单逐帧分类，而是按稳定工件分件检测，符合产线质检逻辑。其次，Task A 引入动态定位，解决端面漂移问题。再次，Task B 使用 per-ROI PatchCore，避免不同帽位混入同一 memory bank。最后，presence 只作为高置信兜底信号，而不是替代深度特征判定，降低了颜色规则对光照的敏感性。
+
+\subsubsection{不足}
+
+当前系统仍然存在一些不足。第一，训练和演示脚本没有缓存特征，每次生成视频都要重新提取 DINOv2 特征。第二，评估指标仍主要基于已知异常时间点和人工观察，缺少逐件精确标注后的标准准确率、召回率和 F1 值。第三，Task B 在压力测试片段中仍可能对某些反光或姿态变化给出高分，说明无监督模型在边界样本上仍需要更细致的阈值校准。
+
+\subsubsection{后续改进}
+
+后续可以从三个方向改进。第一，增加标注工具，对每个工件建立 OK/NG 标签，从而得到更严格的评估指标。第二，引入特征缓存与 FAISS 加速，使系统更接近实时部署。第三，对 Task B 的帽位结构加入轻量几何先验，例如帽位中心位置、圆环边缘完整性或上下连接件一致性，用于解释异常位置，而不是完全依赖黑盒特征距离。
+
+\newpage
+\subsection{消融实验与设计对比}
+
+\subsubsection{逐帧检测与按件检测对比}
+
+最初的直觉方案是对视频抽帧后逐帧检测，只要当前帧分数超过阈值就输出 NG。这种方式实现简单，但在本项目中并不适合作为最终方案。流水线视频中工件进入 ROI 的过程持续数十帧，此时 ROI 中经常只有半个工件或局部帽位。对这样的帧直接评分，PatchCore 会正确地认为它“不像完整正常件”，但这并不代表产品异常，而只是检测时机不对。
+
+按件检测把问题从“当前帧是否异常”改为“当前稳定工件是否异常”。该改变显著减少了无工件、半进入、半离开和运动模糊导致的误报。它也让输出更符合质检习惯：产线最终关心的是一个工件是否合格，而不是某一帧是否与训练样本相似。演示视频中的 \texttt{WAIT} 和 \texttt{MOVING} 状态正是这种设计的外在体现。
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{p{0.25\textwidth}p{0.30\textwidth}p{0.30\textwidth}}
+        \toprule
+        方案 & 优点 & 主要问题 \\
+        \midrule
+        逐帧检测 & 实现简单，实时反馈快 & 半进入帧误报多，结果不对应单件质量 \\
+        按件检测 & 输出与工件一一对应，抗运动干扰更强 & 需要状态机和尾部 flush 逻辑 \\
+        最终方案 & 稳定帧采样 + 件级聚合，适合演示和提交 & 参数需要结合视频节奏调节 \\
+        \bottomrule
+    \end{tabular}
+    \caption{逐帧检测与按件检测对比}
+\end{table}
+
+\subsubsection{固定 ROI 与动态定位对比}
+
+Task A 中固定 ROI 的问题主要来自端面漂移。若 ROI 偏离端面，PatchCore 看到的是背景、夹具或端面边缘的组合，其分数会升高，但该高分不是缺盖导致的。动态定位使每个 ROI patch 更接近同一语义区域，即“端面中心附近”。从异常检测角度看，动态定位降低了正常样本的类内方差，使训练分布更紧凑，阈值更有意义。
+
+Task B 没有采用动态定位，是因为四个帽位的位置相对稳定，且检测目标是四个局部区域的存在性。若对 Task B 过度动态定位，反而可能把 ROI 从固定帽位语义上移动走，导致不同工件之间的 ROI 不再对应同一位置。因此最终方案不是“所有任务都动态定位”，而是根据产品结构选择合适的 ROI 策略。
+
+\subsubsection{单模型 PatchCore 与 per-ROI PatchCore 对比}
+
+Task B 的单模型 PatchCore 把四个帽位 patch 混在一起训练，表面上样本数更多，但会引入语义混淆。蓝色帽位、白色帽位、透明边缘和连接件在同一个 memory bank 中共存，测试时某个异常 patch 可能仍能在另一个帽位的正常样本中找到近邻，导致异常分数被压低。
+
+per-ROI PatchCore 的代价是训练四个模型，但每个模型只学习一个帽位的正常分布。这样阈值和分数都更局部、更可解释。调试日志中可以直接看到 ROI1、ROI2、ROI3、ROI4 的独立阈值和分数，便于判断异常来自哪一个帽位。
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{p{0.22\textwidth}p{0.30\textwidth}p{0.34\textwidth}}
+        \toprule
+        方案 & 适用情况 & 在 Task B 中的表现 \\
+        \midrule
+        单一 PatchCore & 多 ROI 外观相近 & 帽位差异被混合，局部缺失不够稳定 \\
+        模板匹配 & 目标形状固定、光照稳定 & 可解释，但对反光和姿态变化敏感 \\
+        per-ROI PatchCore & 多位置外观不同但位置稳定 & 最终采用，异常命中更明显 \\
+        \bottomrule
+    \end{tabular}
+    \caption{Task B 判定方案对比}
+\end{table}
+
+\newpage
+\subsection{评价指标与人工核验方式}
+
+\subsubsection{为什么没有完整逐件标签}
+
+严格计算准确率、召回率和 F1 值需要每一个工件的真实标签。当前作业数据只给出了视频和少量异常时间提示，没有提供逐件级标注文件。因此本项目的评估采用“已知异常时间点 + 回归片段人工核验”的方式。该方式不能替代完整数据集评估，但在课程项目中足以判断算法是否能稳定命中关键异常案例。
+
+如果后续要得到更严谨指标，可以在 \texttt{tools/} 中增加一个标注脚本：播放视频并记录每个工件的开始时间、结束时间和 OK/NG 标签。之后将检测输出与人工标签按时间区间匹配，即可计算混淆矩阵。
+
+\subsubsection{当前使用的经验指标}
+
+当前调试中主要关注以下指标：
+
+\begin{itemize}
+    \item 已知异常时间点是否被包含在某个 NG 工件单元中。
+    \item 最终演示片段是否包含正常与异常对照。
+    \item 空场景和运动过程是否避免输出 OK/NG。
+    \item 长片段回归中 NG 数量是否明显偏多。
+    \item 单个 ROI 的异常分数是否与视觉异常位置一致。
+\end{itemize}
+
+这些指标虽不如标准分类指标严格，但直接服务于本作业的提交目标：演示流畅、异常能检出、误报不过多、方法可解释。
+
+\subsubsection{建议的标准评估流程}
+
+后续若继续完善，可以建立如下标准评估流程。第一步，用 tracker 自动导出所有工件单元的时间范围；第二步，人工在 CSV 中标注每个单元的真实标签；第三步，运行检测器导出预测标签；第四步，根据工件编号或时间区间合并预测和标签；第五步，计算 Accuracy、Precision、Recall、F1 和平均推理时间。
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lll}
+        \toprule
+        指标 & 公式 & 意义 \\
+        \midrule
+        Accuracy & $(TP+TN)/(TP+TN+FP+FN)$ & 总体判定正确率 \\
+        Precision & $TP/(TP+FP)$ & 判为 NG 的工件中有多少是真异常 \\
+        Recall & $TP/(TP+FN)$ & 真实异常中有多少被检出 \\
+        F1 & $2PR/(P+R)$ & 精确率和召回率的综合指标 \\
+        平均耗时 & 总推理时间/工件数 & 部署实时性参考 \\
+        \bottomrule
+    \end{tabular}
+    \caption{后续可使用的标准评价指标}
+\end{table}
+
+\newpage
+\subsection{工程部署方案设想}
+
+\subsubsection{从课程代码到产线系统}
+
+当前项目是课程作业形态，重点是算法流程和演示效果。如果部署到真实产线，需要补充模型缓存、异常报警接口、日志存储、参数管理和异常复核功能。核心算法仍可保持不变，但运行方式应从“每次运行脚本重新训练并生成视频”改为“离线训练、在线推理、实时报警”。
+
+一个可行的部署流程如下。离线阶段，从最近一段稳定正常生产视频中提取正常样本，训练 DINOv2+PatchCore memory bank，并保存到磁盘。在线阶段，系统持续读取相机流，tracker 判断工件到位后调用检测器评分。如果输出 NG，则保存当前工件截图、ROI patch、异常分数和时间戳，并发送给上位机或人工复核界面。
+
+\subsubsection{实时性优化}
+
+实时性瓶颈主要来自 DINOv2 前向推理和 PatchCore kNN 搜索。优化方式包括：
+
+\begin{enumerate}[label=\arabic*.]
+    \item 使用较小输入尺寸或更轻量 backbone。
+    \item 对连续帧进行更强采样，只检测稳定中间帧。
+    \item 使用 FAISS 代替普通 kNN 搜索。
+    \item 将 DINOv2 导出为 ONNX，并使用 TensorRT 或 OpenVINO 加速。
+    \item 缓存正常 memory bank，避免在线阶段重复训练。
+\end{enumerate}
+
+\subsubsection{维护与再训练}
+
+工业现场光照、相机位置和产品批次可能随时间变化。若长期运行，应定期用确认正常的新样本更新 memory bank。更新时必须避免混入异常样本，否则模型会把异常也学习成正常。较稳妥的做法是建立人工确认流程：系统收集低分正常件候选，人工抽检确认后加入再训练集。
+
+\newpage
+\subsection{失败案例库与风险控制}
+
+\subsubsection{半进入工件}
+
+半进入工件是最典型的失败案例。如果 ROI 只看到一部分帽位，PatchCore 分数会高，但这种高分不应输出为 NG。当前 tracker 的 \texttt{WAITING} 和 \texttt{MOVING} 状态就是针对这一问题设计的。Task B 还使用 \texttt{min\_present\_rois} 要求至少 3 个帽位可见才进入检测，进一步降低半进入误报。
+
+\subsubsection{透明壳体反光}
+
+Task B 中透明外壳和金属背景会产生强反光，尤其影响白色帽位。反光可能造成 DINOv2 特征变化，也可能降低白色颜色比例。最终方案通过提高 presence 投票比例和使用件级分位数聚合来缓解这一问题。对于仍然存在的边界样本，可以在后续加入偏振光源、固定曝光或背景遮挡板等硬件改进。
+
+\subsubsection{训练集污染}
+
+无监督异常检测最大的风险是训练集污染。如果训练段中混入异常工件，memory bank 会包含异常特征，测试时类似异常可能被误判为正常。项目通过跳过前 60 秒、稳定分件、训练段选择和 presence 过滤降低该风险，但若真实部署，仍需要人工确认训练段确实为正常生产。
+
+\subsubsection{阈值漂移}
+
+阈值来自训练正常分数分布。如果相机曝光变化或产品批次变化，正常分数分布可能整体偏移，原阈值会过严或过松。解决方法包括定期重新校准阈值、保留历史正常分数分布、监控 OK 件平均分数趋势，以及设置人工复核区间。
+
+\newpage
+\subsection{结论}
+
+本项目完成了工业装配件缺失检测的完整流程。系统训练阶段只使用正常样本，符合无监督异常检测设定；推理阶段按稳定工件输出 OK/NG，避免空场景和运动过程误判；可视化视频能够展示 ROI、状态、分数和结果；报告与 README 说明了运行方式和最终产物。
+
+Task A 通过动态定位和 PatchCore 检测，能够稳定识别圆形端面异常。Task B 通过四 ROI 独立 PatchCore 和严格 presence 辅助门控，能够识别多帽位缺失或装配异常。最终提交视频均约 15 秒，并包含正常与异常案例。整体上，项目满足作业关于预处理、深度方法、结果分析、演示视频和报告的要求。
+
+\newpage
+\appendix
+\section{附录 A：关键配置参数说明}
+
+\begin{longtable}{p{0.32\textwidth}p{0.18\textwidth}p{0.40\textwidth}}
+\toprule
+参数 & 当前值 & 说明 \\
+\midrule
+\texttt{skip\_duration} & 60 & 跳过前 60 秒抖动和不稳定片段。 \\
+\texttt{train\_duration} & 120/180/280 & 正常训练段时长，任务级可覆盖。 \\
+\texttt{step\_test} & 3 & 测试视频抽帧间隔，降低重复计算。 \\
+\texttt{motion\_threshold} & 6/8 & 运动门控阈值，Task A 更严格。 \\
+\texttt{blur\_threshold} & 15 & 模糊门控阈值。 \\
+\texttt{min\_foreground\_ratio} & 0.015 & 前景比例下限，用于判断是否有工件。 \\
+\texttt{coreset\_ratio} & 0.1 & PatchCore memory bank 子采样比例。 \\
+\texttt{knn\_k} & 3 & 最近邻数量。 \\
+\texttt{threshold\_k} & 3.0 & 自适应阈值标准差系数。 \\
+\texttt{score\_aggregation} & mean\_top5 & patch 分数聚合方式。 \\
+\texttt{unit\_trim\_ratio} & 0.2 & 去除工件进入/离开边缘帧比例。 \\
+\texttt{unit\_score\_percentile} & 80/95 & 单件分数分位数聚合。 \\
+\texttt{unit\_threshold\_margin} & 1.1 & Task B 件级阈值 margin。 \\
+\texttt{taskB\_presence\_ng\_vote\_ratio} & 0.90 & Task B presence 触发比例。 \\
+\texttt{dinov2\_model} & vit\_small\_patch14\_dinov2 & 使用的 DINOv2 backbone。 \\
+\texttt{input\_size} & 224 & 模型输入尺寸。 \\
+\texttt{viz\_width} & 1920 & 演示视频宽度。 \\
+\texttt{viz\_height} & 1080 & 演示视频高度。 \\
+\bottomrule
+\caption{关键配置参数说明}
+\end{longtable}
+
+\newpage
+\section{附录 B：核心伪代码}
+
+\subsection{训练流程伪代码}
+
+\begin{lstlisting}[language=Python]
+cfg = load_config(task_name)
+roi_cfg = parse_rois(cfg)
+train_patches = extract_training_unit_patches(video, roi_cfg, cfg)
+
+if task_name == "taskB":
+    grouped = split_by_roi(train_patches, roi_count=4)
+    detector = PerRoiAnomalyDetector(cfg, roi_count=4)
+    detector.train(grouped)
+else:
+    detector = AnomalyDetector(cfg)
+    detector.train(train_patches)
+\end{lstlisting}
+
+\subsection{推理流程伪代码}
+
+\begin{lstlisting}[language=Python]
+for frame in video:
+    frame = rotate_if_needed(frame)
+    rois = crop_or_localize_rois(frame)
+    tracker.update(frame_idx, frame, rois)
+
+    while tracker.has_completed_unit():
+        unit = tracker.pop_unit()
+        mean_score, max_score, is_ng = detector.score_unit(unit.frames)
+        status = "NG" if is_ng else "OK"
+        render_dashboard(frame, rois, status, max_score)
+\end{lstlisting}
+
+\newpage
+\section{附录 C：主要实验日志摘要}
+
+\subsection{Task A 15 秒演示日志}
+
+\begin{lstlisting}
+[taskA] Training ...
+Localized training patches extracted: 243
+Threshold: 0.2199
+Testing 360.0s-390.0s, output at 21.9 fps (2.2x)
+Unit #1: OK  (360.0s-366.8s, max=0.1597)
+Unit #2: OK  (368.9s-372.6s, max=0.1543)
+Unit #3: NG  (374.4s-378.4s, max=0.3340)
+Unit #4: NG  (380.3s-384.1s, max=0.3819)
+Unit #5: NG  (max=0.3666)
+Result: 5 units, OK=2, NG=3
+\end{lstlisting}
+
+\subsection{Task B 15 秒演示日志}
+
+\begin{lstlisting}
+[taskB] Training ...
+Unit training patches extracted: 540
+ROI#1: patches=135, patchcore_thr=0.1622, color_thr=0.323
+ROI#2: patches=135, patchcore_thr=0.1765, color_thr=0.463
+ROI#3: patches=135, patchcore_thr=0.2044, color_thr=0.659
+ROI#4: patches=135, patchcore_thr=0.1788, color_thr=0.304
+Testing 1050.0s-1080.0s, output at 22.0 fps (2.2x)
+Unit #1: NG  (1050.0s-1050.7s, max=0.3814)
+Unit #2: OK  (1051.8s-1055.8s, max=0.1753)
+Unit #3: OK  (1056.9s-1060.9s, max=0.2097)
+Unit #4: OK  (1062.0s-1066.0s, max=0.1701)
+Unit #5: OK  (1067.1s-1071.1s, max=0.1732)
+Unit #6: NG  (1072.2s-1075.0s, max=0.3745)
+Unit #7: OK  (max=0.1624)
+Result: 7 units, OK=5, NG=2
+\end{lstlisting}
+
+\newpage
+\section{附录 D：提交文件清单}
+
+\begin{longtable}{p{0.38\textwidth}p{0.52\textwidth}}
+\toprule
+文件或目录 & 说明 \\
+\midrule
+\texttt{README.md} & 项目说明、环境安装、运行命令和最终产物路径。 \\
+\texttt{requirements.txt} & Python 依赖。 \\
+\texttt{config.yaml} & 全局与任务级配置。 \\
+\texttt{src/} & 核心算法代码。 \\
+\texttt{tools/} & 演示生成和辅助工具。 \\
+\texttt{dataset/} & 原始视频与示例图。 \\
+\texttt{results/taskA\_15s\_demo.mp4} & Task A 最终短演示视频。 \\
+\texttt{results/taskB\_15s\_demo.mp4} & Task B 最终短演示视频。 \\
+\texttt{report/cv\_final\_report.pdf} & 本报告 PDF。 \\
+\texttt{guide.md} & 作业要求说明。 \\
+\bottomrule
+\caption{提交文件清单}
+\end{longtable}
+
+\newpage
+\section{附录 E：答辩可解释要点}
+
+如果需要在课堂或报告答辩中解释本项目，可以重点说明以下几点。第一，本项目没有用异常样本训练，符合无监督异常检测设定。第二，PatchCore 的作用是建立正常局部特征库，异常分数来自当前 patch 与正常库的最近邻距离。第三，Task A 与 Task B 的差异不是算法不统一，而是 ROI 组织方式不同：Task A 是动态定位后的单 ROI，Task B 是四个固定帽位的独立 ROI。第四，演示视频中等待和移动状态不输出 OK/NG，是为了避免把空场景和半进入状态误判为质检结果。第五，Task B 的 presence 辅助不是主方法，只用于明显持续缺失的兜底。
+
+从工程角度看，本项目最重要的经验是：工业视频异常检测不能只关注模型本身，预处理、分件、ROI 稳定性和可视化解释同样决定最终效果。PatchCore 提供了强有力的无监督异常评分，但如果训练样本混入运动帧或 ROI 不稳定，模型仍会产生大量误报。因此最终效果来自模型与工程流程的共同优化。
 
 \end{document}

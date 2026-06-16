@@ -1,31 +1,100 @@
-\contentsline {section}{\numberline {1}项目背景与任务描述}{1}{section.1}%
-\contentsline {subsection}{\numberline {1.1}任务目标}{1}{subsection.1.1}%
-\contentsline {subsection}{\numberline {1.2}数据描述}{1}{subsection.1.2}%
-\contentsline {section}{\numberline {2}方法描述}{1}{section.2}%
-\contentsline {subsection}{\numberline {2.1}整体流程}{1}{subsection.2.1}%
-\contentsline {subsection}{\numberline {2.2}视频预处理}{2}{subsection.2.2}%
-\contentsline {subsubsection}{\numberline {2.2.1}关键帧提取}{2}{subsubsection.2.2.1}%
-\contentsline {subsubsection}{\numberline {2.2.2}ROI自动定位}{2}{subsubsection.2.2.2}%
-\contentsline {subsection}{\numberline {2.3}PatchCore 异常检测}{2}{subsection.2.3}%
-\contentsline {subsubsection}{\numberline {2.3.1}特征提取}{2}{subsubsection.2.3.1}%
-\contentsline {subsubsection}{\numberline {2.3.2}记忆库与Coreset子采样}{3}{subsubsection.2.3.2}%
-\contentsline {subsubsection}{\numberline {2.3.3}异常评分}{3}{subsubsection.2.3.3}%
-\contentsline {subsubsection}{\numberline {2.3.4}阈值设定}{4}{subsubsection.2.3.4}%
-\contentsline {section}{\numberline {3}实验结果}{4}{section.3}%
-\contentsline {subsection}{\numberline {3.1}预处理结果}{4}{subsection.3.1}%
-\contentsline {subsubsection}{\numberline {3.1.1}ROI自动定位}{4}{subsubsection.3.1.1}%
-\contentsline {subsection}{\numberline {3.2}Task 1 实验结果（圆形卡扣盖）}{4}{subsection.3.2}%
-\contentsline {subsubsection}{\numberline {3.2.1}模型训练}{4}{subsubsection.3.2.1}%
-\contentsline {subsubsection}{\numberline {3.2.2}异常分数分布}{4}{subsubsection.3.2.2}%
-\contentsline {subsubsection}{\numberline {3.2.3}不同阈值下的检测结果}{5}{subsubsection.3.2.3}%
-\contentsline {subsection}{\numberline {3.3}Task 2 实验结果（方形密封盖）}{5}{subsection.3.3}%
-\contentsline {subsubsection}{\numberline {3.3.1}模型训练}{5}{subsubsection.3.3.1}%
-\contentsline {subsubsection}{\numberline {3.3.2}异常分数分布}{5}{subsubsection.3.3.2}%
-\contentsline {subsubsection}{\numberline {3.3.3}不同阈值下的检测结果}{5}{subsubsection.3.3.3}%
-\contentsline {subsection}{\numberline {3.4}综合对比}{6}{subsection.3.4}%
-\contentsline {subsection}{\numberline {3.5}结果分析}{6}{subsection.3.5}%
-\contentsline {section}{\numberline {4}思考与改进}{7}{section.4}%
-\contentsline {subsection}{\numberline {4.1}最难检测的情况分析}{7}{subsection.4.1}%
-\contentsline {subsection}{\numberline {4.2}改进思路}{7}{subsection.4.2}%
-\contentsline {subsection}{\numberline {4.3}关于YOLO方法的思考}{8}{subsection.4.3}%
-\contentsline {section}{\numberline {5}总结}{8}{section.5}%
+\contentsline {section}{\numberline {1}摘要}{1}{section.1}%
+\contentsline {section}{符号、缩写与状态定义}{2}{section*.3}%
+\contentsline {section}{\numberline {2}绪论}{3}{section.2}%
+\contentsline {subsection}{\numberline {2.1}工业装配件缺失检测的实际意义}{3}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}作业要求拆解}{3}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}为什么选择无监督异常检测}{3}{subsection.2.3}%
+\contentsline {section}{\numberline {3}作业要求分析与任务建模}{5}{section.3}%
+\contentsline {subsection}{\numberline {3.1}数据组成}{5}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}输入输出定义}{5}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}训练与测试约束}{5}{subsection.3.3}%
+\contentsline {section}{\numberline {4}系统总体设计}{7}{section.4}%
+\contentsline {subsection}{\numberline {4.1}模块划分}{7}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}端到端流程}{7}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}配置驱动设计}{7}{subsection.4.3}%
+\contentsline {section}{\numberline {5}视频预处理与 ROI 定位}{9}{section.5}%
+\contentsline {subsection}{\numberline {5.1}稳定工件分件}{9}{subsection.5.1}%
+\contentsline {subsubsection}{\numberline {5.1.1}跳过开头抖动}{9}{subsubsection.5.1.1}%
+\contentsline {subsubsection}{\numberline {5.1.2}运动与前景门控}{9}{subsubsection.5.1.2}%
+\contentsline {subsubsection}{\numberline {5.1.3}按件聚合}{9}{subsubsection.5.1.3}%
+\contentsline {subsection}{\numberline {5.2}ROI 定位策略}{11}{subsection.5.2}%
+\contentsline {subsubsection}{\numberline {5.2.1}固定 ROI 与动态 ROI 的取舍}{11}{subsubsection.5.2.1}%
+\contentsline {subsubsection}{\numberline {5.2.2}Task A 动态端面定位}{11}{subsubsection.5.2.2}%
+\contentsline {subsubsection}{\numberline {5.2.3}Task B 四帽位 ROI}{11}{subsubsection.5.2.3}%
+\contentsline {section}{\numberline {6}DINOv2 特征与 PatchCore 异常检测}{12}{section.6}%
+\contentsline {subsection}{\numberline {6.1}DINOv2 特征提取}{12}{subsection.6.1}%
+\contentsline {subsubsection}{\numberline {6.1.1}选择 DINOv2 的原因}{12}{subsubsection.6.1.1}%
+\contentsline {subsubsection}{\numberline {6.1.2}特征提取过程}{12}{subsubsection.6.1.2}%
+\contentsline {subsubsection}{\numberline {6.1.3}特征与传统颜色规则的关系}{12}{subsubsection.6.1.3}%
+\contentsline {subsection}{\numberline {6.2}PatchCore 异常检测方法}{13}{subsection.6.2}%
+\contentsline {subsubsection}{\numberline {6.2.1}正常样本 memory bank}{13}{subsubsection.6.2.1}%
+\contentsline {subsubsection}{\numberline {6.2.2}kNN 异常评分}{13}{subsubsection.6.2.2}%
+\contentsline {subsubsection}{\numberline {6.2.3}阈值校准}{13}{subsubsection.6.2.3}%
+\contentsline {section}{\numberline {7}Task A：圆形端面装配状态检测}{14}{section.7}%
+\contentsline {subsection}{\numberline {7.1}Task A 难点}{14}{subsection.7.1}%
+\contentsline {subsection}{\numberline {7.2}训练样本提取}{14}{subsection.7.2}%
+\contentsline {subsection}{\numberline {7.3}异常判定}{14}{subsection.7.3}%
+\contentsline {section}{\numberline {8}Task B：多帽位装配状态检测}{15}{section.8}%
+\contentsline {subsection}{\numberline {8.1}Task B 难点}{15}{subsection.8.1}%
+\contentsline {subsection}{\numberline {8.2}四 ROI 独立建模}{15}{subsection.8.2}%
+\contentsline {subsection}{\numberline {8.3}presence 辅助门控}{15}{subsection.8.3}%
+\contentsline {subsection}{\numberline {8.4}最终演示片段}{15}{subsection.8.4}%
+\contentsline {section}{\numberline {9}可视化设计与工程输出}{17}{section.9}%
+\contentsline {subsection}{\numberline {9.1}演示视频布局}{17}{subsection.9.1}%
+\contentsline {subsection}{\numberline {9.2}状态显示逻辑}{17}{subsection.9.2}%
+\contentsline {subsection}{\numberline {9.3}ROI 分数解释}{17}{subsection.9.3}%
+\contentsline {section}{\numberline {10}实验结果与分析}{18}{section.10}%
+\contentsline {subsection}{\numberline {10.1}Task A 演示结果}{18}{subsection.10.1}%
+\contentsline {subsection}{\numberline {10.2}Task B 演示结果}{18}{subsection.10.2}%
+\contentsline {subsection}{\numberline {10.3}Task B 长片段回归}{18}{subsection.10.3}%
+\contentsline {section}{\numberline {11}参数调试、速度与鲁棒性分析}{20}{section.11}%
+\contentsline {subsection}{\numberline {11.1}参数调试过程}{20}{subsection.11.1}%
+\contentsline {subsubsection}{\numberline {11.1.1}Task A 调试思路}{20}{subsubsection.11.1.1}%
+\contentsline {subsubsection}{\numberline {11.1.2}Task B 从模板匹配回到 PatchCore}{20}{subsubsection.11.1.2}%
+\contentsline {subsubsection}{\numberline {11.1.3}Task B 阈值取舍}{20}{subsubsection.11.1.3}%
+\contentsline {subsection}{\numberline {11.2}速度与资源分析}{21}{subsection.11.2}%
+\contentsline {subsubsection}{\numberline {11.2.1}抽帧与按件采样}{21}{subsubsection.11.2.1}%
+\contentsline {subsubsection}{\numberline {11.2.2}Coreset 降低 kNN 成本}{21}{subsubsection.11.2.2}%
+\contentsline {subsubsection}{\numberline {11.2.3}演示生成速度}{21}{subsubsection.11.2.3}%
+\contentsline {subsection}{\numberline {11.3}误报、漏报与鲁棒性分析}{22}{subsection.11.3}%
+\contentsline {subsubsection}{\numberline {11.3.1}运动状态误报}{22}{subsubsection.11.3.1}%
+\contentsline {subsubsection}{\numberline {11.3.2}反光与白色帽位}{22}{subsubsection.11.3.2}%
+\contentsline {subsubsection}{\numberline {11.3.3}弱异常与阈值边界}{22}{subsubsection.11.3.3}%
+\contentsline {section}{\numberline {12}工程实现与复现}{23}{section.12}%
+\contentsline {subsection}{\numberline {12.1}与作业要求的对应关系}{23}{subsection.12.1}%
+\contentsline {subsection}{\numberline {12.2}代码组织与可复现性}{24}{subsection.12.2}%
+\contentsline {subsubsection}{\numberline {12.2.1}运行环境}{24}{subsubsection.12.2.1}%
+\contentsline {subsubsection}{\numberline {12.2.2}生成演示视频}{24}{subsubsection.12.2.2}%
+\contentsline {subsubsection}{\numberline {12.2.3}复现实验结果}{24}{subsubsection.12.2.3}%
+\contentsline {section}{\numberline {13}方法对比、改进分析与总结}{25}{section.13}%
+\contentsline {subsection}{\numberline {13.1}创新点与不足}{25}{subsection.13.1}%
+\contentsline {subsubsection}{\numberline {13.1.1}创新点}{25}{subsubsection.13.1.1}%
+\contentsline {subsubsection}{\numberline {13.1.2}不足}{25}{subsubsection.13.1.2}%
+\contentsline {subsubsection}{\numberline {13.1.3}后续改进}{25}{subsubsection.13.1.3}%
+\contentsline {subsection}{\numberline {13.2}消融实验与设计对比}{26}{subsection.13.2}%
+\contentsline {subsubsection}{\numberline {13.2.1}逐帧检测与按件检测对比}{26}{subsubsection.13.2.1}%
+\contentsline {subsubsection}{\numberline {13.2.2}固定 ROI 与动态定位对比}{26}{subsubsection.13.2.2}%
+\contentsline {subsubsection}{\numberline {13.2.3}单模型 PatchCore 与 per-ROI PatchCore 对比}{26}{subsubsection.13.2.3}%
+\contentsline {subsection}{\numberline {13.3}评价指标与人工核验方式}{28}{subsection.13.3}%
+\contentsline {subsubsection}{\numberline {13.3.1}为什么没有完整逐件标签}{28}{subsubsection.13.3.1}%
+\contentsline {subsubsection}{\numberline {13.3.2}当前使用的经验指标}{28}{subsubsection.13.3.2}%
+\contentsline {subsubsection}{\numberline {13.3.3}建议的标准评估流程}{28}{subsubsection.13.3.3}%
+\contentsline {subsection}{\numberline {13.4}工程部署方案设想}{30}{subsection.13.4}%
+\contentsline {subsubsection}{\numberline {13.4.1}从课程代码到产线系统}{30}{subsubsection.13.4.1}%
+\contentsline {subsubsection}{\numberline {13.4.2}实时性优化}{30}{subsubsection.13.4.2}%
+\contentsline {subsubsection}{\numberline {13.4.3}维护与再训练}{30}{subsubsection.13.4.3}%
+\contentsline {subsection}{\numberline {13.5}失败案例库与风险控制}{31}{subsection.13.5}%
+\contentsline {subsubsection}{\numberline {13.5.1}半进入工件}{31}{subsubsection.13.5.1}%
+\contentsline {subsubsection}{\numberline {13.5.2}透明壳体反光}{31}{subsubsection.13.5.2}%
+\contentsline {subsubsection}{\numberline {13.5.3}训练集污染}{31}{subsubsection.13.5.3}%
+\contentsline {subsubsection}{\numberline {13.5.4}阈值漂移}{31}{subsubsection.13.5.4}%
+\contentsline {subsection}{\numberline {13.6}结论}{32}{subsection.13.6}%
+\contentsline {section}{\numberline {A}附录 A：关键配置参数说明}{33}{appendix.A}%
+\contentsline {section}{\numberline {B}附录 B：核心伪代码}{34}{appendix.B}%
+\contentsline {subsection}{\numberline {B.1}训练流程伪代码}{34}{subsection.B.1}%
+\contentsline {subsection}{\numberline {B.2}推理流程伪代码}{34}{subsection.B.2}%
+\contentsline {section}{\numberline {C}附录 C：主要实验日志摘要}{35}{appendix.C}%
+\contentsline {subsection}{\numberline {C.1}Task A 15 秒演示日志}{35}{subsection.C.1}%
+\contentsline {subsection}{\numberline {C.2}Task B 15 秒演示日志}{35}{subsection.C.2}%
+\contentsline {section}{\numberline {D}附录 D：提交文件清单}{36}{appendix.D}%
+\contentsline {section}{\numberline {E}附录 E：答辩可解释要点}{37}{appendix.E}%
