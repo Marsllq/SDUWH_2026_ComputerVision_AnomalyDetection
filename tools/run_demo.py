@@ -219,7 +219,7 @@ def run_demo(task_name, start_s, duration_s, speed=1.0):
             unit_end_s = start_s + unit["frames"][-1][0] / fps
             print(f"  Unit #{unit['id']}: {'❌ NG' if is_ng else '✅ OK'} "
                   f"({unit_start_s:.1f}s-{unit_end_s:.1f}s, max={max_s:.4f})")
-            if task_name == "taskB" and hasattr(detector, "last_unit_debug") and detector.last_unit_debug:
+            if cfg.get("demo_debug_rois", False) and task_name == "taskB" and hasattr(detector, "last_unit_debug") and detector.last_unit_debug:
                 roi_debug = []
                 for d in detector.last_unit_debug:
                     mark = "!" if d["patchcore_ng"] or d["presence_ng"] else " "
