@@ -1,0 +1,34 @@
+# === 大数据文件 ===
+dataset/
+results/
+
+# === 编译产物 ===
+report/main.pdf
+report/*.aux
+report/*.log
+report/*.out
+report/*.toc
+report/*.synctex.gz
+report/*.fdb_latexmk
+report/*.fls
+report/*.bbl
+report/*.blg
+
+# === Python ===
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# === macOS ===
+.DS_Store
+._*
+
+# === IDE ===
+.vscode/
+.idea/
+
+# === 测试 ===
+test.txt
