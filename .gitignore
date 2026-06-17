@@ -1,20 +1,9 @@
 # === 大数据文件（原始数据视频过大，排除） ===
 dataset/
 
+# === 报告与结果（大文件多，不提交） ===
 report/
-
 results/
-
-# === 编译产物 ===
-report/*.aux
-report/*.log
-report/*.out
-report/*.toc
-report/*.synctex.gz
-report/*.fdb_latexmk
-report/*.fls
-report/*.bbl
-report/*.blg
 
 # === Python ===
 __pycache__/
