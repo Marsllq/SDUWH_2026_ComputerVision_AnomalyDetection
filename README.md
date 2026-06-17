@@ -40,6 +40,7 @@
 .
 ├── src/                          # 核心算法代码
 │   ├── config.py                 # 配置加载
+│   ├── main.py                   # 主流程编排器（训练→推理→视频输出）
 │   ├── preprocessing.py          # 视频读取、ROI 裁剪、patch 提取
 │   ├── tracker.py                # 运动门控与工件分件
 │   ├── locator.py                # Task A 动态端面定位
@@ -48,16 +49,19 @@
 │   ├── detection.py              # 单/多 ROI 检测器
 │   └── visualization.py          # 仪表盘可视化
 ├── tools/
-│   └── run_demo.py               # 训练、推理和演示视频生成入口
+│   ├── run_demo.py               # 自定义片段的演示视频生成
+│   ├── run_fast.py               # 快速推理（跳过视频渲染，仅输出统计）
+│   ├── roi_marker.py             # 交互式 ROI 标定工具
+│   └── extract_frames.py         # ROI 参考帧提取工具
 ├── config.yaml                   # Task A / Task B 全局与任务级配置
-├── dataset/                      # 原始视频和参考图
-├── results/                      # 演示视频和中间可视化结果
-├── report/
-│   ├── cv_final_report.tex       # 实验报告 LaTeX 源码
-│   └── cv_final_report.pdf       # 最终实验报告 PDF
-├── guide.md                      # 作业要求说明
 └── requirements.txt              # Python 依赖
 ```
+
+> 以下目录/文件仅存在于本地，**不纳入版本控制**：
+> - `dataset/` — 原始视频（体积过大）
+> - `results/` — 生成的演示视频
+> - `report/` — 实验报告源码和 PDF
+> - `guide.md` — 作业要求说明
 
 ---
 
@@ -69,24 +73,30 @@
 pip install -r requirements.txt
 ```
 
-### 生成 Task A 演示视频（15 秒）
+### 运行 Task A 完整流水线
 
 ```bash
-python tools/run_demo.py taskA 360 30 2.2
+python src/main.py taskA
 ```
 
-### 生成 Task B 演示视频（15 秒）
+### 运行 Task B 完整流水线
 
 ```bash
-python tools/run_demo.py taskB 1050 30 2.2
+python src/main.py taskB
 ```
 
-### Task B 长片段回归（可选）
+### 自定义片段演示视频
 
 ```bash
-python tools/run_demo.py taskB 1040 50 2
-python tools/run_demo.py taskB 250 50 2
-python tools/run_demo.py taskB 930 50 2
+python tools/run_demo.py taskA 360 30 2.2     # Task A: 360s 起 30s 片段
+python tools/run_demo.py taskB 1050 30 2.2    # Task B: 1050s 起 30s 片段
+```
+
+### 快速推理（跳过渲染）
+
+```bash
+python tools/run_fast.py taskA
+python tools/run_fast.py taskB
 ```
 
 ---
@@ -102,11 +112,13 @@ python tools/run_demo.py taskB 930 50 2
 
 ## 📦 最终产物
 
-| 产物 | 路径 | 说明 |
+| 产物 | 生成方式 | 说明 |
 |:---|:---|:---|
-| 代码仓库 | 本项目目录 | 预处理、特征提取、训练、推理和可视化 |
-| Task A 演示 | `results/taskA_15s_demo.mp4` | 15 秒短视频，含正常/异常对照 |
-| Task B 演示 | `results/taskB_15s_demo.mp4` | 15 秒短视频，含正常/异常对照 |
+| 代码仓库 | 本仓库 | 预处理、特征提取、训练、推理和可视化 |
+| Task A 演示 | `python src/main.py taskA` | 完整流水线，输出至 `results/` |
+| Task B 演示 | `python src/main.py taskB` | 完整流水线，输出至 `results/` |
+| 自定义片段 | `python tools/run_demo.py <task> <start> <dur>` | 指定起止时间的演示视频 |
+| 快速评测 | `python tools/run_fast.py <task>` | 跳过渲染，仅输出检测统计 |
 | 实验报告 | `report/cv_final_report.pdf` | 完整方法、结果、分析与改进讨论 |
 
 ---
