@@ -1,6 +1,10 @@
 # === 大数据文件（原始数据视频过大，排除） ===
 dataset/
 
+/report
+
+/results
+
 # === 编译产物 ===
 report/*.aux
 report/*.log
