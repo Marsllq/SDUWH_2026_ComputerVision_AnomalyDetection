@@ -1,9 +1,9 @@
 # === 大数据文件（原始数据视频过大，排除） ===
 dataset/
 
-/report
+report/
 
-/results
+results/
 
 # === 编译产物 ===
 report/*.aux
