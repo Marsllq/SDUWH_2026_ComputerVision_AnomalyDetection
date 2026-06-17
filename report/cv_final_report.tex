@@ -48,32 +48,32 @@
 
 最终产物包括代码、报告 PDF 和演示视频。GitHub 仓库链接暂以占位符表示：\url{https://github.com/PLACEHOLDER/cv-industrial-assembly-inspection}。最终演示视频位于 \texttt{results/taskA\_15s\_demo.mp4} 与 \texttt{results/taskB\_15s\_demo.mp4}，均包含正常件与异常件案例。Task B 的 15 秒演示从较长回归视频的中间区间截取，包含 1072 秒附近的明显异常工件，并保留前后正常工件作为对照。
 
-\newpage
-\section*{符号、缩写与状态定义}
-\addcontentsline{toc}{section}{符号、缩写与状态定义}
+% \newpage
+% \section*{符号、缩写与状态定义}
+% \addcontentsline{toc}{section}{符号、缩写与状态定义}
 
-\begin{longtable}{p{0.22\textwidth}p{0.68\textwidth}}
-\toprule
-符号或缩写 & 含义 \\
-\midrule
-ROI & Region of Interest，感兴趣区域，表示每帧中真正参与检测的局部区域。 \\
-OK & 当前稳定工件符合正常装配状态。 \\
-NG & 当前稳定工件偏离正常装配状态，需要复核或告警。 \\
-WAIT & 当前没有完整工件进入检测区域，暂不输出质量判定。 \\
-MOVING & 工件正在进入或离开检测区域，尚未稳定，暂不输出最终质量判定。 \\
-INSPECTING & 工件稳定到位，系统开始计算异常分数并输出 OK/NG。 \\
-DINOv2 & 自监督视觉表征模型，本项目使用 ViT-S/14 版本提取 patch token 特征。 \\
-PatchCore & 基于正常 patch 特征记忆库和最近邻距离的无监督异常检测方法。 \\
-Memory Bank & 正常训练样本的 patch 特征集合，用于测试阶段最近邻查询。 \\
-$z$ & 一个 ROI patch 对应的局部特征向量。 \\
-$\mathcal{M}$ & 正常样本记忆库。 \\
-$d(z,\mathcal{M})$ & 测试特征到正常记忆库的最近邻距离或聚合距离。 \\
-$\theta$ & 异常判定阈值，由训练段正常分数分布估计。 \\
-TP/TN/FP/FN & 真阳性、真阴性、假阳性、假阴性。本文若进行标准统计，NG 为正类。 \\
-FPS & 每秒处理帧数，用于表示推理或视频生成效率。 \\
-\bottomrule
-\caption{符号、缩写与状态定义}
-\end{longtable}
+% \begin{longtable}{p{0.22\textwidth}p{0.68\textwidth}}
+% \toprule
+% 符号或缩写 & 含义 \\
+% \midrule
+% ROI & Region of Interest，感兴趣区域，表示每帧中真正参与检测的局部区域。 \\
+% OK & 当前稳定工件符合正常装配状态。 \\
+% NG & 当前稳定工件偏离正常装配状态，需要复核或告警。 \\
+% WAIT & 当前没有完整工件进入检测区域，暂不输出质量判定。 \\
+% MOVING & 工件正在进入或离开检测区域，尚未稳定，暂不输出最终质量判定。 \\
+% INSPECTING & 工件稳定到位，系统开始计算异常分数并输出 OK/NG。 \\
+% DINOv2 & 自监督视觉表征模型，本项目使用 ViT-S/14 版本提取 patch token 特征。 \\
+% PatchCore & 基于正常 patch 特征记忆库和最近邻距离的无监督异常检测方法。 \\
+% Memory Bank & 正常训练样本的 patch 特征集合，用于测试阶段最近邻查询。 \\
+% $z$ & 一个 ROI patch 对应的局部特征向量。 \\
+% $\mathcal{M}$ & 正常样本记忆库。 \\
+% $d(z,\mathcal{M})$ & 测试特征到正常记忆库的最近邻距离或聚合距离。 \\
+% $\theta$ & 异常判定阈值，由训练段正常分数分布估计。 \\
+% TP/TN/FP/FN & 真阳性、真阴性、假阳性、假阴性。本文若进行标准统计，NG 为正类。 \\
+% FPS & 每秒处理帧数，用于表示推理或视频生成效率。 \\
+% \bottomrule
+% \caption{符号、缩写与状态定义}
+% \end{longtable}
 
 \newpage
 \section{绪论}
